@@ -172,15 +172,19 @@ copyBtn.addEventListener('click', () => {
     });
 });
 
-// TTS Implementation
+// TTS Implementation (Dual Engine: Supertonic3 & Web Speech API)
 class TTSManager {
     constructor() {
         this.synth = window.speechSynthesis;
+        this.audioPlayer = new Audio();
         this.sentences = [];
         this.currentIndex = 0;
         this.isPlaying = false;
         this.isPaused = false;
         this.utterance = null;
+        
+        this.isSupertonic = true; // default to supertonic if available
+        this.selectedVoice = null;
 
         // Settings
         this.rate = 1.0;
@@ -216,22 +220,27 @@ class TTSManager {
         this.previewPane = document.getElementById('preview-output');
         this.voiceSelect = document.getElementById('voice-select');
 
+        this.audioPlayer.addEventListener('ended', () => {
+            if (this.isPlaying && !this.isPaused && this.isSupertonic) {
+                this.currentIndex++;
+                this.speakNext();
+            }
+        });
+
+        this.audioPlayer.addEventListener('error', (e) => {
+            console.error('Audio playback error', e);
+            this.stop();
+        });
+
         this.bindEvents();
         this.loadVoices();
-
-        // Handle voice loading (async)
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = () => this.loadVoices();
-        }
-
-        // Ensure clean state on page unload
+        
         window.onbeforeunload = () => {
             this.synth.cancel();
         };
     }
 
     bindEvents() {
-        // Playback
         const toggleHandler = () => this.toggle();
         const stopHandler = () => this.stop();
 
@@ -241,143 +250,137 @@ class TTSManager {
         if (this.stopBtn) this.stopBtn.addEventListener('click', stopHandler);
         if (this.headerStopBtn) this.headerStopBtn.addEventListener('click', stopHandler);
 
-
-        // Navigation
         if (this.prevBtn) this.prevBtn.addEventListener('click', () => this.prevSentence());
         if (this.nextBtn) this.nextBtn.addEventListener('click', () => this.nextSentence());
 
-        // Rate
         if (this.rateIncreaseBtn) this.rateIncreaseBtn.addEventListener('click', () => this.updateRate(0.1));
         if (this.rateDecreaseBtn) this.rateDecreaseBtn.addEventListener('click', () => this.updateRate(-0.1));
 
-        // Pitch
         if (this.pitchIncreaseBtn) this.pitchIncreaseBtn.addEventListener('click', () => this.updatePitch(0.1));
         if (this.pitchDecreaseBtn) this.pitchDecreaseBtn.addEventListener('click', () => this.updatePitch(-0.1));
 
-        // Size
         if (this.sizeIncreaseBtn) this.sizeIncreaseBtn.addEventListener('click', () => this.updateSize(10));
         if (this.sizeDecreaseBtn) this.sizeDecreaseBtn.addEventListener('click', () => this.updateSize(-10));
 
-        // Voice Select
         if (this.voiceSelect) {
             this.voiceSelect.addEventListener('change', () => this.updateVoice());
         }
     }
 
-    loadVoices() {
+    async loadVoices() {
         if (!this.voiceSelect) return;
+        
+        const populateSelect = (supertonicVoices, nativeVoices) => {
+            // Retain previous selection if any
+            const previousValue = this.voiceSelect.value;
+            
+            this.voiceSelect.innerHTML = '';
+            
+            // Supertonic group
+            const stGroup = document.createElement('optgroup');
+            stGroup.label = 'Supertonic 3 (AI)';
+            supertonicVoices.forEach(voice => {
+                const option = document.createElement('option');
+                option.textContent = voice;
+                option.value = 'st:' + voice;
+                stGroup.appendChild(option);
+            });
+            if (stGroup.children.length > 0) {
+                this.voiceSelect.appendChild(stGroup);
+            }
 
-        let voices = this.synth.getVoices();
-
-        // Filter for specific language if desired, or keep all. 
-        // User asked for "korean" mostly implied by context, but keeping all is safer or just KR.
-        // Let's sort to put Korean first, then English, then others.
-        // And prioritize "Google" or "Premium" in name.
-
-        voices.sort((a, b) => {
-            const aName = a.name + a.lang;
-            const bName = b.name + b.lang;
-            return aName.localeCompare(bName);
-        });
-
-        // Clear existing
-        this.voiceSelect.innerHTML = '';
-
-        // Add "Default" option
-        const defaultOption = document.createElement('option');
-        defaultOption.textContent = '기본 음성';
-        defaultOption.value = '';
-        this.voiceSelect.appendChild(defaultOption);
-
-        let bestVoiceIndex = -1;
-
-        voices.forEach((voice, index) => {
-            // Focus on Korean voices for this user
-            if (voice.lang.includes('ko') || voice.lang.includes('KO')) {
+            // Native group
+            const nativeGroup = document.createElement('optgroup');
+            nativeGroup.label = '브라우저 기본 음성';
+            nativeVoices.forEach((voice, index) => {
                 const option = document.createElement('option');
                 option.textContent = `${voice.name} (${voice.lang})`;
-                option.value = index; // Store index to retrieve object later easily
-                this.voiceSelect.appendChild(option);
-
-                // Auto-select 'Google' voice if available as it's usually good quality
-                if (bestVoiceIndex === -1 && voice.name.includes('Google')) {
-                    bestVoiceIndex = this.voiceSelect.options.length - 1;
+                option.value = 'nt:' + index;
+                nativeGroup.appendChild(option);
+            });
+            if (nativeGroup.children.length > 0) {
+                this.voiceSelect.appendChild(nativeGroup);
+            }
+            
+            if (previousValue && this.voiceSelect.querySelector(`option[value="${previousValue}"]`)) {
+                this.voiceSelect.value = previousValue;
+            } else if (stGroup.children.length > 0) {
+                this.voiceSelect.value = stGroup.children[0].value;
+            } else if (nativeGroup.children.length > 0) {
+                // Pre-select a Korean voice if possible
+                let koIdx = Array.from(nativeGroup.children).findIndex(opt => opt.textContent.includes('ko') || opt.textContent.includes('KO'));
+                if (koIdx !== -1) {
+                    this.voiceSelect.value = nativeGroup.children[koIdx].value;
+                } else {
+                    this.voiceSelect.value = nativeGroup.children[0].value;
                 }
             }
-        });
+            
+            this.updateVoice();
+        };
 
-        // Add other voices (English etc) if needed? 
-        // For now, let's just add ALL voices but put KR at top? 
-        // Or just KR? The user complained about quality. 
-        // Let's add all, but select the best KR one.
-
-        // Re-loop for non-KR to append? Or just dump all. 
-        // Let's refine: Filter KR voices only for the dropdown to keep it clean, 
-        // unless none found, then show all.
-
-        if (this.voiceSelect.options.length <= 1) {
-            voices.forEach((voice, index) => {
-                const option = document.createElement('option');
-                option.textContent = `${voice.name} (${voice.lang})`;
-                option.value = index;
-                this.voiceSelect.appendChild(option);
-            });
+        let supertonicVoices = [];
+        try {
+            const res = await fetch('/api/voices');
+            const data = await res.json();
+            if (data.ok && data.voices) {
+                supertonicVoices = data.voices;
+            }
+        } catch (e) {
+            console.error('Failed to load Supertonic3 voices', e);
         }
 
-        // Auto selection
-        if (bestVoiceIndex !== -1) {
-            this.voiceSelect.selectedIndex = bestVoiceIndex;
-            this.updateVoice();
+        const nativeVoices = this.synth.getVoices();
+        populateSelect(supertonicVoices, nativeVoices);
+
+        if (speechSynthesis.onvoiceschanged !== undefined) {
+            speechSynthesis.onvoiceschanged = () => {
+                const newNativeVoices = this.synth.getVoices();
+                populateSelect(supertonicVoices, newNativeVoices);
+            };
         }
     }
 
     updateVoice() {
-        const selectedIndex = this.voiceSelect.value;
-        if (selectedIndex === '') {
+        const val = this.voiceSelect.value;
+        if (!val) {
+            this.isSupertonic = false;
             this.selectedVoice = null;
-        } else {
-            // We stored index relative to the sorted 'voices' array... wait.
-            // onVoicesChanged might re-trigger. 
-            // Better to store name? No, names can be duplicate. 
-            // Let's find the voice object by name/lang from the selected option text?
-            // Safer: `getVoices` returns same array instance usually? No.
-            // Let's just grab the current voices again and match by name.
-            const voices = this.synth.getVoices();
-            const selectedOption = this.voiceSelect.options[this.voiceSelect.selectedIndex];
-            const voiceName = selectedOption.textContent.split(' (')[0]; // simple parse
-
-            this.selectedVoice = voices.find(v => v.name === voiceName) || null;
+            return;
+        }
+        
+        if (val.startsWith('st:')) {
+            this.isSupertonic = true;
+            this.selectedVoice = val.substring(3);
+        } else if (val.startsWith('nt:')) {
+            this.isSupertonic = false;
+            const idx = parseInt(val.substring(3), 10);
+            this.selectedVoice = this.synth.getVoices()[idx] || null;
         }
     }
 
     cleanTextForTTS(text) {
-        // Remove markdown symbols for reading
         return text.replace(/[*#`_\[\]]/g, '').trim();
     }
 
     splitIntoSentences(text) {
-        // More robust splitting: splits by punctuation but keeps logical flows if needed.
-        // Also filters empty strings immediately.
         return (text.match(/[^.!?\n]+[.!?\n\s]*|[^.!?\n]+$/g) || [])
             .map(s => s.trim())
             .filter(s => s.length > 0);
     }
 
     highlightSentence(text) {
-        // Remove previous highlights
         const highlights = document.querySelectorAll('.highlight-sentence');
         highlights.forEach(el => {
             const parent = el.parentNode;
             parent.replaceChild(document.createTextNode(el.innerText), el);
-            parent.normalize(); // Merge text nodes
+            parent.normalize();
         });
 
         if (!text) return;
-
         const cleanText = text.trim();
         if (!cleanText) return;
 
-        // Highlighting Logic
         const walker = document.createTreeWalker(this.previewPane, NodeFilter.SHOW_TEXT, null, false);
         let node;
         while (node = walker.nextNode()) {
@@ -398,8 +401,9 @@ class TTSManager {
     }
 
     updateRate(change) {
-        this.rate = Math.max(0.1, Math.min(10.0, parseFloat((this.rate + change).toFixed(1))));
+        this.rate = Math.max(0.5, Math.min(2.0, parseFloat((this.rate + change).toFixed(1))));
         this.rateValueDisplay.textContent = this.rate.toFixed(1);
+        this.audioPlayer.playbackRate = this.rate;
     }
 
     updatePitch(change) {
@@ -415,8 +419,6 @@ class TTSManager {
 
     updateCounter() {
         if (this.sentenceCounter) {
-            // Display current/total. 
-            // If stopped (sentences=[]), handle gracefully
             const total = this.sentences.length;
             const current = total > 0 ? this.currentIndex + 1 : 0;
             this.sentenceCounter.textContent = `${current} / ${total}`;
@@ -437,12 +439,9 @@ class TTSManager {
             return;
         }
 
-        if (this.isPlaying) {
-            return;
-        }
+        if (this.isPlaying) return;
 
-        // STOP everything first to ensure clean state
-        this.synth.cancel();
+        this.stop();
 
         const textContent = this.previewPane.innerText;
         this.sentences = this.splitIntoSentences(textContent);
@@ -450,20 +449,18 @@ class TTSManager {
         if (this.sentences.length === 0) return;
 
         this.currentIndex = 0;
-        this.isPlaying = true; // Use this flag to track our logical state independent of browser
+        this.isPlaying = true;
         this.isPaused = false;
 
         this.updateControls();
         this.updateCounter();
 
-        // Small delay to allow browser to register cancel
         setTimeout(() => {
             this.speakNext();
         }, 50);
     }
 
-    speakNext() {
-        // Check if we should stop
+    async speakNext() {
         if (!this.isPlaying || this.isPaused) return;
 
         if (this.currentIndex >= this.sentences.length) {
@@ -472,8 +469,6 @@ class TTSManager {
         }
 
         const sentence = this.sentences[this.currentIndex];
-
-        // Safeguard: empty sentence? skip
         if (!sentence || sentence.trim().length === 0) {
             this.currentIndex++;
             this.speakNext();
@@ -483,45 +478,69 @@ class TTSManager {
         this.highlightSentence(sentence);
         this.updateCounter();
 
-        // Create Utterance
-        this.utterance = new SpeechSynthesisUtterance(this.cleanTextForTTS(sentence));
-        this.utterance.rate = this.rate;
-        this.utterance.pitch = this.pitch;
-        if (this.selectedVoice) {
-            this.utterance.voice = this.selectedVoice;
+        const cleanText = this.cleanTextForTTS(sentence);
+        
+        if (this.isSupertonic) {
+            try {
+                const response = await fetch('/api/tts', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        text: cleanText,
+                        voice: this.selectedVoice,
+                        speed: this.rate
+                    })
+                });
+
+                if (!response.ok) throw new Error('TTS API failed');
+                
+                const data = await response.json();
+                if (data.ok && data.audio_url) {
+                    if (!this.isPlaying || this.isPaused) return;
+                    
+                    this.audioPlayer.src = data.audio_url;
+                    this.audioPlayer.playbackRate = this.rate;
+                    await this.audioPlayer.play();
+                } else {
+                    throw new Error(data.error || 'TTS generation failed');
+                }
+            } catch (e) {
+                console.error('TTS Error:', e);
+                this.stop();
+            }
+        } else {
+            // Web Speech API fallback
+            this.utterance = new SpeechSynthesisUtterance(cleanText);
+            this.utterance.rate = this.rate;
+            this.utterance.pitch = this.pitch;
+            if (this.selectedVoice) {
+                this.utterance.voice = this.selectedVoice;
+            }
+
+            this.utterance.onend = () => {
+                if (this.isPlaying && !this.isPaused && !this.isSupertonic) {
+                    this.currentIndex++;
+                    setTimeout(() => this.speakNext(), 10);
+                }
+            };
+
+            this.utterance.onerror = (e) => {
+                if (e.error === 'interrupted' || e.error === 'canceled') return;
+                console.error('TTS Error:', e);
+                this.stop();
+            };
+
+            this.synth.speak(this.utterance);
         }
-
-        // Event Handling
-        this.utterance.onend = () => {
-            // Only advance if we are still logically 'playing'
-            // If user stopped or paused during this utterance, do nothing.
-            if (this.isPlaying && !this.isPaused) {
-                this.currentIndex++;
-                // Recursive via setTimeout to break call stack and allow UI updates/GC
-                setTimeout(() => this.speakNext(), 10);
-            }
-        };
-
-        this.utterance.onerror = (e) => {
-            if (e.error === 'interrupted') {
-                // Determine if we should continue (e.g. if we caused the interruption by skipping)
-                // If the user clicked prev/next, we handle that logic there. 
-                // So here, if interrupted, we generally do nothing unless we have a specific flag.
-                return;
-            }
-            if (e.error === 'canceled') return;
-
-            console.error('TTS Error:', e);
-            // On error, try to move next or stop? Stop is safer.
-            this.stop();
-        };
-
-        this.synth.speak(this.utterance);
     }
 
     pause() {
         if (this.isPlaying && !this.isPaused) {
-            this.synth.pause();
+            if (this.isSupertonic) {
+                this.audioPlayer.pause();
+            } else {
+                this.synth.pause();
+            }
             this.isPaused = true;
             this.updateControls();
         }
@@ -529,7 +548,11 @@ class TTSManager {
 
     resume() {
         if (this.isPlaying && this.isPaused) {
-            this.synth.resume();
+            if (this.isSupertonic) {
+                this.audioPlayer.play().catch(e => console.error(e));
+            } else {
+                this.synth.resume();
+            }
             this.isPaused = false;
             this.updateControls();
         }
@@ -537,6 +560,8 @@ class TTSManager {
 
     stop() {
         this.synth.cancel();
+        this.audioPlayer.pause();
+        this.audioPlayer.src = '';
         this.isPlaying = false;
         this.isPaused = false;
         this.currentIndex = 0;
@@ -547,13 +572,10 @@ class TTSManager {
 
     nextSentence() {
         if (!this.isPlaying) return;
-
-        // Cancel current speech immediately
         this.synth.cancel();
-
+        this.audioPlayer.pause();
         if (this.currentIndex < this.sentences.length - 1) {
             this.currentIndex++;
-            // Use setTimeout to ensure cancel is processed
             setTimeout(() => this.speakNext(), 50);
         } else {
             this.stop();
@@ -562,14 +584,12 @@ class TTSManager {
 
     prevSentence() {
         if (!this.isPlaying) return;
-
         this.synth.cancel();
-
+        this.audioPlayer.pause();
         if (this.currentIndex > 0) {
             this.currentIndex--;
             setTimeout(() => this.speakNext(), 50);
         } else {
-            // If already at start, just restart current
             setTimeout(() => this.speakNext(), 50);
         }
     }
@@ -578,7 +598,6 @@ class TTSManager {
         const isPlayingOrPaused = this.isPlaying;
         const isPaused = this.isPaused;
 
-        // SVG Icons
         const playIcon = `
             <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -594,7 +613,6 @@ class TTSManager {
             </svg>
         `;
 
-        // Update Toggle Buttons
         if (this.toggleBtn) {
             if (isPlayingOrPaused && !isPaused) {
                 this.toggleBtn.innerHTML = pauseIcon;
@@ -615,17 +633,12 @@ class TTSManager {
             }
         }
 
-        // Update Stop Buttons
         if (this.stopBtn) {
             this.stopBtn.disabled = !isPlayingOrPaused;
         }
         if (this.headerStopBtn) {
             this.headerStopBtn.disabled = !isPlayingOrPaused;
         }
-
-        /* Legacy/Previous Logic (removed)
-        if (this.playBtn && this.pauseBtn && this.stopBtn) { ... }
-        */
     }
 }
 
