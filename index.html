@@ -4,7 +4,8 @@
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0, user-scalable=no" />
   <title>Markdown Viewer</title>
   <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -163,6 +164,14 @@
                 <input type="checkbox" id="repeat-en-checkbox">
                 <span class="switch-track"></span>
               </label>
+            </div>
+            <div class="settings-row-item">
+              <span class="control-label">문장당 반복 횟수</span>
+              <div class="control-group">
+                <button id="repeat-count-decrease" class="icon-btn sm" title="반복 횟수 감소">−</button>
+                <span id="repeat-count-value" class="value-display">2</span>
+                <button id="repeat-count-increase" class="icon-btn sm" title="반복 횟수 증가">+</button>
+              </div>
             </div>
           </section>
 

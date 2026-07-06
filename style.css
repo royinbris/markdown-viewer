@@ -27,6 +27,10 @@
   padding: 0;
 }
 
+html {
+  touch-action: pan-x pan-y;
+}
+
 body {
   font-family: 'Inter', 'Noto Sans KR', sans-serif;
   background-color: var(--bg-color);
@@ -34,6 +38,7 @@ body {
   height: 100vh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
+  touch-action: pan-x pan-y;
 }
 
 #app {
@@ -331,6 +336,46 @@ textarea::placeholder {
     border-right: none;
     border-bottom: 1px solid var(--border-color);
   }
+}
+
+/* Frontmatter (collapsed by default) */
+.markdown-body .frontmatter-details {
+  margin-bottom: 20px;
+}
+
+.markdown-body .frontmatter-details summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  list-style: none;
+  user-select: none;
+}
+
+.markdown-body .frontmatter-details summary::-webkit-details-marker {
+  display: none;
+}
+
+.markdown-body .frontmatter-details summary::before {
+  content: "▸ ";
+}
+
+.markdown-body .frontmatter-details[open] summary::before {
+  content: "▾ ";
+}
+
+.markdown-body .frontmatter-details[open] summary {
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  border-bottom: none;
+}
+
+.markdown-body .frontmatter-details table {
+  margin-bottom: 0;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
 }
 
 /* Table Styling */

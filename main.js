@@ -112,7 +112,7 @@ function preprocessMarkdown(markdown) {
             const content = markdown.slice(endFrontmatter + 4);
 
             const lines = frontmatter.split('\n');
-            let tableMarkdown = '| Key | Value |\n|---|---|\n';
+            let rows = '';
 
             for (const line of lines) {
                 const colonIndex = line.indexOf(':');
@@ -122,10 +122,12 @@ function preprocessMarkdown(markdown) {
                     if (value.startsWith('http')) {
                         value = `<a href="${value}" target="_blank" rel="noopener noreferrer">${value}</a>`;
                     }
-                    tableMarkdown += `| **${key}** | ${value} |\n`;
+                    rows += `<tr><td><strong>${key}</strong></td><td>${value}</td></tr>`;
                 }
             }
-            return tableMarkdown + '\n' + content;
+            // <details>는 기본적으로 접혀 있어 초기 로드 시 프론트매터가 보이지 않는다
+            const html = `<details class="frontmatter-details">\n<summary>메타데이터</summary>\n\n<table>\n<thead><tr><th>Key</th><th>Value</th></tr></thead>\n<tbody>${rows}</tbody>\n</table>\n\n</details>\n\n`;
+            return html + content;
         }
     }
     return markdown;
@@ -197,6 +199,9 @@ class TTSManager {
         this.isPlaying = false;
         this.isPaused = false;
         this.repeatEnglish = localStorage.getItem('repeat_english') === 'true';
+        this.repeatTimes = Math.max(1, parseInt(localStorage.getItem('repeat_times'), 10) || 2);
+        this.repeatCountLeft = 0;
+        this.lastSpokenIndex = -1;
 
         this.serverUrl = (localStorage.getItem('supertonic_url') || DEFAULT_SERVER_URL).replace(/\/$/, '');
         this.token = localStorage.getItem('supertonic_token') || '';
@@ -240,12 +245,19 @@ class TTSManager {
         this.settingsOpenBtn = document.getElementById('settings-open-btn');
         this.settingsCloseBtn = document.getElementById('settings-close-btn');
         this.repeatEnCheckbox = document.getElementById('repeat-en-checkbox');
+        this.repeatCountIncreaseBtn = document.getElementById('repeat-count-increase');
+        this.repeatCountDecreaseBtn = document.getElementById('repeat-count-decrease');
+        this.repeatCountValueDisplay = document.getElementById('repeat-count-value');
         this.serverUrlInput = document.getElementById('server-url-input');
         this.serverTokenInput = document.getElementById('server-token-input');
         this.serverSaveBtn = document.getElementById('server-save-btn');
 
         this.audioPlayer.addEventListener('ended', () => {
-            if (this.isPlaying && !this.isPaused) {
+            if (!this.isPlaying || this.isPaused) return;
+            if (this.repeatEnglish && this.repeatCountLeft > 0) {
+                this.repeatCountLeft--;
+                this.speakNext();
+            } else {
                 this.currentIndex++;
                 this.speakNext();
             }
@@ -262,6 +274,7 @@ class TTSManager {
         this.populateVoices();
         this.updateRateDisplays();
         this.updateRepeatButton();
+        if (this.repeatCountValueDisplay) this.repeatCountValueDisplay.textContent = this.repeatTimes;
     }
 
     bindEvents() {
@@ -314,6 +327,9 @@ class TTSManager {
         if (this.repeatEnCheckbox) {
             this.repeatEnCheckbox.addEventListener('change', () => this.toggleRepeatEnglish());
         }
+
+        if (this.repeatCountIncreaseBtn) this.repeatCountIncreaseBtn.addEventListener('click', () => this.updateRepeatTimes(1));
+        if (this.repeatCountDecreaseBtn) this.repeatCountDecreaseBtn.addEventListener('click', () => this.updateRepeatTimes(-1));
 
         if (this.serverSaveBtn) {
             this.serverSaveBtn.addEventListener('click', () => this.saveServerSettings());
@@ -459,13 +475,25 @@ class TTSManager {
         if (this.repeatEnCheckbox) this.repeatEnCheckbox.checked = this.repeatEnglish;
     }
 
+    updateRepeatTimes(change) {
+        this.repeatTimes = Math.max(1, Math.min(10, this.repeatTimes + change));
+        localStorage.setItem('repeat_times', this.repeatTimes);
+        if (this.repeatCountValueDisplay) this.repeatCountValueDisplay.textContent = this.repeatTimes;
+        this.repeatCountLeft = 0;
+    }
+
     rebuildPlaylist() {
         if (!this.allSentences) return;
+        // 재생 위치를 최대한 유지: 현재 읽던 문장을 새 목록에서 다시 찾는다
+        const currentText = this.sentences[this.currentIndex];
         this.sentences = this.repeatEnglish
             ? this.allSentences.filter(isEnglishSentence)
             : this.allSentences;
         this.audioCache = {};
-        this.currentIndex = 0;
+        this.repeatCountLeft = 0;
+        this.lastSpokenIndex = -1;
+        const foundIndex = currentText ? this.sentences.indexOf(currentText) : -1;
+        this.currentIndex = foundIndex !== -1 ? foundIndex : 0;
         this.updateCounter();
 
         if (this.isPlaying) {
@@ -565,6 +593,12 @@ class TTSManager {
             this.currentIndex++;
             this.speakNext();
             return;
+        }
+
+        // 새 문장으로 넘어갈 때만 반복 횟수를 다시 채운다 (같은 문장 반복 중엔 유지)
+        if (index !== this.lastSpokenIndex) {
+            this.repeatCountLeft = this.repeatEnglish ? this.repeatTimes - 1 : 0;
+            this.lastSpokenIndex = index;
         }
 
         this.highlightSentence(sentence);
