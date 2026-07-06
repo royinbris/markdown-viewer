@@ -453,18 +453,32 @@ class TTSManager {
             .filter(s => s.length > 0);
     }
 
+    // 서버 연결 워밍업/일시적 지연에 대비해 실패 시 잠시 후 재시도한다
+    async fetchAudioWithRetry(text, retries = 2, delayMs = 900) {
+        for (let attempt = 0; attempt <= retries; attempt++) {
+            try {
+                const r = await fetch(this.synthUrl(text));
+                if (r.ok) {
+                    const b = await r.blob();
+                    return URL.createObjectURL(b);
+                }
+                this.lastFetchError = `HTTP ${r.status}`;
+            } catch (e) {
+                this.lastFetchError = e?.message || '네트워크 오류';
+            }
+            if (attempt < retries) {
+                await new Promise(res => setTimeout(res, delayMs));
+            }
+        }
+        return null;
+    }
+
     prefetch(index) {
         if (index < 0 || index >= this.sentences.length) return;
         if (this.audioCache[index]) return;
         const text = this.cleanTextForTTS(this.sentences[index]);
         if (!text) { this.audioCache[index] = Promise.resolve(null); return; }
-        this.audioCache[index] = fetch(this.synthUrl(text))
-            .then(r => r.ok ? r.blob() : Promise.reject(new Error(`HTTP ${r.status}`)))
-            .then(b => URL.createObjectURL(b))
-            .catch(e => {
-                this.lastFetchError = e?.message || '네트워크 오류';
-                return null;
-            });
+        this.audioCache[index] = this.fetchAudioWithRetry(text);
     }
 
     highlightSentence(text) {
