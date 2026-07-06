@@ -178,7 +178,6 @@ copyBtn.addEventListener('click', () => {
 const DEFAULT_SERVER_URL = location.protocol === 'https:'
     ? 'https://roy-macbookair.tailf4ccb7.ts.net'
     : 'http://royui-macbookair.local:8080';
-const DEFAULT_TOKEN = '8c3b3bb420a64406';
 const SUPERTONIC_VOICES = ['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'];
 
 class TTSManager {
@@ -191,7 +190,7 @@ class TTSManager {
         this.isPaused = false;
 
         this.serverUrl = (localStorage.getItem('supertonic_url') || DEFAULT_SERVER_URL).replace(/\/$/, '');
-        this.token = localStorage.getItem('supertonic_token') || DEFAULT_TOKEN;
+        this.token = localStorage.getItem('supertonic_token') || '';
         this.voice = localStorage.getItem('supertonic_voice') || 'M1';
         this.fmt = localStorage.getItem('supertonic_fmt') || 'wav';
 
@@ -423,7 +422,8 @@ class TTSManager {
         this.stop();
         this.unlockAudio();
 
-        const textContent = this.previewPane.innerText;
+        // 에디터 모드에서는 미리보기가 숨겨져 innerText가 비므로 textContent로 폴백
+        const textContent = this.previewPane.innerText || this.previewPane.textContent;
         if (this.sentenceCounter) this.sentenceCounter.textContent = '분석 중...';
         this.sentences = await this.splitIntoSentences(textContent);
 
@@ -584,3 +584,4 @@ class TTSManager {
 editor.value = initialMarkdown;
 updatePreview();
 const ttsManager = new TTSManager();
+window.__tts = ttsManager;
