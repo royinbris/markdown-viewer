@@ -180,21 +180,31 @@ const DEFAULT_SERVER_URL = location.protocol === 'https:'
     : 'http://royui-macbookair.local:8080';
 const SUPERTONIC_VOICES = ['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'];
 
+// 한글이 없고 알파벳이 있으면 영어 문장으로 판단
+function isEnglishSentence(text) {
+    const hangul = (text.match(/[가-힣]/g) || []).length;
+    const latin = (text.match(/[A-Za-z]/g) || []).length;
+    return hangul === 0 && latin > 0;
+}
+
 class TTSManager {
     constructor() {
         this.audioPlayer = new Audio();
         this.sentences = [];
+        this.allSentences = null;
         this.audioCache = {};
         this.currentIndex = 0;
         this.isPlaying = false;
         this.isPaused = false;
+        this.repeatEnglish = localStorage.getItem('repeat_english') === 'true';
 
         this.serverUrl = (localStorage.getItem('supertonic_url') || DEFAULT_SERVER_URL).replace(/\/$/, '');
         this.token = localStorage.getItem('supertonic_token') || '';
         this.voice = localStorage.getItem('supertonic_voice') || 'M1';
         this.fmt = localStorage.getItem('supertonic_fmt') || 'wav';
 
-        this.rate = 1.0;
+        this.rateEn = parseFloat(localStorage.getItem('rate_en')) || 1.0;
+        this.rateKo = parseFloat(localStorage.getItem('rate_ko')) || 1.0;
         this.textSize = 100; // percent
 
         // Controls
@@ -202,14 +212,19 @@ class TTSManager {
         this.stopBtn = document.getElementById('footer-stop');
         this.prevBtn = document.getElementById('tts-prev');
         this.nextBtn = document.getElementById('tts-next');
+        this.repeatEnBtn = document.getElementById('tts-repeat-en');
 
         // Header controls (Sync)
         this.headerToggleBtn = document.getElementById('tts-toggle');
         this.headerStopBtn = document.getElementById('tts-stop');
 
-        this.rateIncreaseBtn = document.getElementById('rate-increase');
-        this.rateDecreaseBtn = document.getElementById('rate-decrease');
-        this.rateValueDisplay = document.getElementById('rate-value');
+        this.rateEnIncreaseBtn = document.getElementById('rate-en-increase');
+        this.rateEnDecreaseBtn = document.getElementById('rate-en-decrease');
+        this.rateEnValueDisplay = document.getElementById('rate-en-value');
+
+        this.rateKoIncreaseBtn = document.getElementById('rate-ko-increase');
+        this.rateKoDecreaseBtn = document.getElementById('rate-ko-decrease');
+        this.rateKoValueDisplay = document.getElementById('rate-ko-value');
 
         this.sizeIncreaseBtn = document.getElementById('size-increase');
         this.sizeDecreaseBtn = document.getElementById('size-decrease');
@@ -219,7 +234,15 @@ class TTSManager {
         this.previewPane = document.getElementById('preview-output');
         this.voiceSelect = document.getElementById('voice-select');
         this.fmtSelect = document.getElementById('fmt-select');
-        this.serverBtn = document.getElementById('server-settings');
+
+        // Settings modal
+        this.settingsModal = document.getElementById('settings-modal');
+        this.settingsOpenBtn = document.getElementById('settings-open-btn');
+        this.settingsCloseBtn = document.getElementById('settings-close-btn');
+        this.repeatEnCheckbox = document.getElementById('repeat-en-checkbox');
+        this.serverUrlInput = document.getElementById('server-url-input');
+        this.serverTokenInput = document.getElementById('server-token-input');
+        this.serverSaveBtn = document.getElementById('server-save-btn');
 
         this.audioPlayer.addEventListener('ended', () => {
             if (this.isPlaying && !this.isPaused) {
@@ -237,6 +260,8 @@ class TTSManager {
 
         this.bindEvents();
         this.populateVoices();
+        this.updateRateDisplays();
+        this.updateRepeatButton();
     }
 
     bindEvents() {
@@ -252,8 +277,12 @@ class TTSManager {
         if (this.prevBtn) this.prevBtn.addEventListener('click', () => this.prevSentence());
         if (this.nextBtn) this.nextBtn.addEventListener('click', () => this.nextSentence());
 
-        if (this.rateIncreaseBtn) this.rateIncreaseBtn.addEventListener('click', () => this.updateRate(0.1));
-        if (this.rateDecreaseBtn) this.rateDecreaseBtn.addEventListener('click', () => this.updateRate(-0.1));
+        if (this.rateEnIncreaseBtn) this.rateEnIncreaseBtn.addEventListener('click', () => this.updateRate('en', 0.1));
+        if (this.rateEnDecreaseBtn) this.rateEnDecreaseBtn.addEventListener('click', () => this.updateRate('en', -0.1));
+        if (this.rateKoIncreaseBtn) this.rateKoIncreaseBtn.addEventListener('click', () => this.updateRate('ko', 0.1));
+        if (this.rateKoDecreaseBtn) this.rateKoDecreaseBtn.addEventListener('click', () => this.updateRate('ko', -0.1));
+
+        if (this.repeatEnBtn) this.repeatEnBtn.addEventListener('click', () => this.toggleRepeatEnglish());
 
         if (this.sizeIncreaseBtn) this.sizeIncreaseBtn.addEventListener('click', () => this.updateSize(10));
         if (this.sizeDecreaseBtn) this.sizeDecreaseBtn.addEventListener('click', () => this.updateSize(-10));
@@ -274,9 +303,44 @@ class TTSManager {
             });
         }
 
-        if (this.serverBtn) {
-            this.serverBtn.addEventListener('click', () => this.editServerSettings());
+        if (this.settingsOpenBtn) this.settingsOpenBtn.addEventListener('click', () => this.openSettings());
+        if (this.settingsCloseBtn) this.settingsCloseBtn.addEventListener('click', () => this.closeSettings());
+        if (this.settingsModal) {
+            this.settingsModal.addEventListener('click', (e) => {
+                if (e.target === this.settingsModal) this.closeSettings();
+            });
         }
+
+        if (this.repeatEnCheckbox) {
+            this.repeatEnCheckbox.addEventListener('change', () => this.toggleRepeatEnglish());
+        }
+
+        if (this.serverSaveBtn) {
+            this.serverSaveBtn.addEventListener('click', () => this.saveServerSettings());
+        }
+    }
+
+    openSettings() {
+        if (!this.settingsModal) return;
+        if (this.serverUrlInput) this.serverUrlInput.value = this.serverUrl;
+        if (this.serverTokenInput) this.serverTokenInput.value = this.token;
+        this.settingsModal.classList.remove('hidden');
+    }
+
+    closeSettings() {
+        if (this.settingsModal) this.settingsModal.classList.add('hidden');
+    }
+
+    saveServerSettings() {
+        const url = (this.serverUrlInput?.value || '').trim().replace(/\/$/, '');
+        const token = (this.serverTokenInput?.value || '').trim();
+        if (!url) return;
+        this.serverUrl = url;
+        this.token = token;
+        localStorage.setItem('supertonic_url', this.serverUrl);
+        localStorage.setItem('supertonic_token', this.token);
+        this.audioCache = {};
+        this.closeSettings();
     }
 
     populateVoices() {
@@ -292,17 +356,6 @@ class TTSManager {
         if (this.fmtSelect) this.fmtSelect.value = this.fmt;
     }
 
-    editServerSettings() {
-        const url = prompt('Supertonic3 서버 주소', this.serverUrl);
-        if (url === null) return;
-        const token = prompt('접근 토큰', this.token);
-        if (token === null) return;
-        this.serverUrl = url.trim().replace(/\/$/, '');
-        this.token = token.trim();
-        localStorage.setItem('supertonic_url', this.serverUrl);
-        localStorage.setItem('supertonic_token', this.token);
-        this.audioCache = {};
-    }
 
     synthUrl(text) {
         return `${this.serverUrl}/synth?token=${encodeURIComponent(this.token)}` +
@@ -372,10 +425,59 @@ class TTSManager {
         }
     }
 
-    updateRate(change) {
-        this.rate = Math.max(0.5, Math.min(2.0, parseFloat((this.rate + change).toFixed(1))));
-        this.rateValueDisplay.textContent = this.rate.toFixed(1);
-        this.audioPlayer.playbackRate = this.rate;
+    updateRate(lang, change) {
+        const clamp = v => Math.max(0.5, Math.min(2.0, parseFloat(v.toFixed(1))));
+        if (lang === 'en') {
+            this.rateEn = clamp(this.rateEn + change);
+            localStorage.setItem('rate_en', this.rateEn);
+        } else {
+            this.rateKo = clamp(this.rateKo + change);
+            localStorage.setItem('rate_ko', this.rateKo);
+        }
+        this.updateRateDisplays();
+
+        const current = this.sentences[this.currentIndex];
+        if (current) {
+            this.audioPlayer.playbackRate = isEnglishSentence(current) ? this.rateEn : this.rateKo;
+        }
+    }
+
+    updateRateDisplays() {
+        if (this.rateEnValueDisplay) this.rateEnValueDisplay.textContent = this.rateEn.toFixed(1);
+        if (this.rateKoValueDisplay) this.rateKoValueDisplay.textContent = this.rateKo.toFixed(1);
+    }
+
+    toggleRepeatEnglish() {
+        this.repeatEnglish = !this.repeatEnglish;
+        localStorage.setItem('repeat_english', this.repeatEnglish);
+        this.updateRepeatButton();
+        this.rebuildPlaylist();
+    }
+
+    updateRepeatButton() {
+        if (this.repeatEnBtn) this.repeatEnBtn.classList.toggle('active', this.repeatEnglish);
+        if (this.repeatEnCheckbox) this.repeatEnCheckbox.checked = this.repeatEnglish;
+    }
+
+    rebuildPlaylist() {
+        if (!this.allSentences) return;
+        this.sentences = this.repeatEnglish
+            ? this.allSentences.filter(isEnglishSentence)
+            : this.allSentences;
+        this.audioCache = {};
+        this.currentIndex = 0;
+        this.updateCounter();
+
+        if (this.isPlaying) {
+            this.audioPlayer.pause();
+            if (this.sentences.length === 0) {
+                if (this.sentenceCounter) this.sentenceCounter.textContent = '영어 문장 없음';
+                this.stop();
+                return;
+            }
+            this.isPaused = false;
+            this.speakNext();
+        }
     }
 
     updateSize(change) {
@@ -425,10 +527,13 @@ class TTSManager {
         // 에디터 모드에서는 미리보기가 숨겨져 innerText가 비므로 textContent로 폴백
         const textContent = this.previewPane.innerText || this.previewPane.textContent;
         if (this.sentenceCounter) this.sentenceCounter.textContent = '분석 중...';
-        this.sentences = await this.splitIntoSentences(textContent);
+        this.allSentences = await this.splitIntoSentences(textContent);
+        this.sentences = this.repeatEnglish
+            ? this.allSentences.filter(isEnglishSentence)
+            : this.allSentences;
 
         if (this.sentences.length === 0) {
-            this.updateCounter();
+            if (this.sentenceCounter) this.sentenceCounter.textContent = this.repeatEnglish ? '영어 문장 없음' : '0 / 0';
             return;
         }
 
@@ -446,8 +551,12 @@ class TTSManager {
         if (!this.isPlaying || this.isPaused) return;
 
         if (this.currentIndex >= this.sentences.length) {
-            this.stop();
-            return;
+            if (this.repeatEnglish && this.sentences.length > 0) {
+                this.currentIndex = 0;
+            } else {
+                this.stop();
+                return;
+            }
         }
 
         const index = this.currentIndex;
@@ -470,7 +579,7 @@ class TTSManager {
             if (!src) throw new Error('음성 합성 실패');
 
             this.audioPlayer.src = src;
-            this.audioPlayer.playbackRate = this.rate;
+            this.audioPlayer.playbackRate = isEnglishSentence(sentence) ? this.rateEn : this.rateKo;
             await this.audioPlayer.play();
             this.prefetch(index + 1);
             this.prefetch(index + 2);
@@ -515,12 +624,15 @@ class TTSManager {
         this.audioPlayer.pause();
         if (this.currentIndex < this.sentences.length - 1) {
             this.currentIndex++;
-            this.isPaused = false;
-            this.updateControls();
-            this.speakNext();
+        } else if (this.repeatEnglish) {
+            this.currentIndex = 0;
         } else {
             this.stop();
+            return;
         }
+        this.isPaused = false;
+        this.updateControls();
+        this.speakNext();
     }
 
     prevSentence() {
