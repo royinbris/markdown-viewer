@@ -69,32 +69,41 @@ const splitContainer = document.querySelector('.split-container');
 let isEditorMode = true;
 splitContainer.classList.add('editor-mode');
 
+function enterEditorMode() {
+    isEditorMode = true;
+    splitContainer.classList.remove('preview-mode');
+    splitContainer.classList.add('editor-mode');
+    viewToggleBtn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
+        <circle cx="12" cy="12" r="3" />
+      </svg>
+    `;
+    viewToggleBtn.title = "View Preview";
+}
+
+function enterPreviewMode() {
+    isEditorMode = false;
+    splitContainer.classList.remove('editor-mode');
+    splitContainer.classList.add('preview-mode');
+    viewToggleBtn.innerHTML = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 20h9"/>
+            <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
+      </svg>
+    `;
+    viewToggleBtn.title = "View Editor";
+    // Also update the preview when switching to it, to ensure it's fresh
+    updatePreview();
+}
+
 viewToggleBtn.addEventListener('click', () => {
-    isEditorMode = !isEditorMode;
     if (isEditorMode) {
-        splitContainer.classList.remove('preview-mode');
-        splitContainer.classList.add('editor-mode');
-        viewToggleBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        `;
-        viewToggleBtn.title = "View Preview";
+        enterPreviewMode();
     } else {
-        splitContainer.classList.remove('editor-mode');
-        splitContainer.classList.add('preview-mode');
-        viewToggleBtn.innerHTML = `
-          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M12 20h9"/>
-                <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>
-          </svg>
-        `;
-        viewToggleBtn.title = "View Editor";
-        // Also update the preview when switching to it, to ensure it's fresh
-        updatePreview();
+        enterEditorMode();
     }
 });
 
@@ -665,6 +674,8 @@ class TTSManager {
         }
 
         if (this.isPlaying) return;
+
+        if (isEditorMode) enterPreviewMode();
 
         this.stop();
         this.unlockAudio();
