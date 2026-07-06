@@ -193,15 +193,19 @@ class TTSManager {
     constructor() {
         this.audioPlayer = new Audio();
         this.sentences = [];
+        this.sentenceIndexMap = [];
         this.allSentences = null;
         this.audioCache = {};
         this.currentIndex = 0;
         this.isPlaying = false;
         this.isPaused = false;
+        // repeatEnglish: 영어 문장을 N번씩 반복 재생 (한글 문장은 항상 1회)
         this.repeatEnglish = localStorage.getItem('repeat_english') === 'true';
         this.repeatTimes = Math.max(1, parseInt(localStorage.getItem('repeat_times'), 10) || 2);
         this.repeatCountLeft = 0;
         this.lastSpokenIndex = -1;
+        // skipKorean: 재생 목록에서 한글 문장 자체를 제외
+        this.skipKorean = localStorage.getItem('skip_korean') === 'true';
 
         this.serverUrl = (localStorage.getItem('supertonic_url') || DEFAULT_SERVER_URL).replace(/\/$/, '');
         this.token = localStorage.getItem('supertonic_token') || '';
@@ -245,6 +249,7 @@ class TTSManager {
         this.settingsOpenBtn = document.getElementById('settings-open-btn');
         this.settingsCloseBtn = document.getElementById('settings-close-btn');
         this.repeatEnCheckbox = document.getElementById('repeat-en-checkbox');
+        this.skipKoreanCheckbox = document.getElementById('skip-korean-checkbox');
         this.repeatCountIncreaseBtn = document.getElementById('repeat-count-increase');
         this.repeatCountDecreaseBtn = document.getElementById('repeat-count-decrease');
         this.repeatCountValueDisplay = document.getElementById('repeat-count-value');
@@ -274,6 +279,7 @@ class TTSManager {
         this.populateVoices();
         this.updateRateDisplays();
         this.updateRepeatButton();
+        this.updateSkipKoreanCheckbox();
         if (this.repeatCountValueDisplay) this.repeatCountValueDisplay.textContent = this.repeatTimes;
     }
 
@@ -326,6 +332,10 @@ class TTSManager {
 
         if (this.repeatEnCheckbox) {
             this.repeatEnCheckbox.addEventListener('change', () => this.toggleRepeatEnglish());
+        }
+
+        if (this.skipKoreanCheckbox) {
+            this.skipKoreanCheckbox.addEventListener('change', () => this.toggleSkipKorean());
         }
 
         if (this.repeatCountIncreaseBtn) this.repeatCountIncreaseBtn.addEventListener('click', () => this.updateRepeatTimes(1));
@@ -467,7 +477,8 @@ class TTSManager {
         this.repeatEnglish = !this.repeatEnglish;
         localStorage.setItem('repeat_english', this.repeatEnglish);
         this.updateRepeatButton();
-        this.rebuildPlaylist();
+        this.repeatCountLeft = 0;
+        this.lastSpokenIndex = -1;
     }
 
     updateRepeatButton() {
@@ -482,18 +493,47 @@ class TTSManager {
         this.repeatCountLeft = 0;
     }
 
+    toggleSkipKorean() {
+        this.skipKorean = !this.skipKorean;
+        localStorage.setItem('skip_korean', this.skipKorean);
+        this.updateSkipKoreanCheckbox();
+        this.rebuildPlaylist();
+    }
+
+    updateSkipKoreanCheckbox() {
+        if (this.skipKoreanCheckbox) this.skipKoreanCheckbox.checked = this.skipKorean;
+    }
+
+    // allSentences로부터 재생 목록을 만든다. sentenceIndexMap[i]는 sentences[i]가
+    // allSentences에서 원래 몇 번째였는지를 기록해, 필터링 후에도 위치를 추적할 수 있게 한다.
+    buildPlaylist() {
+        if (this.skipKorean) {
+            this.sentences = [];
+            this.sentenceIndexMap = [];
+            this.allSentences.forEach((s, i) => {
+                if (isEnglishSentence(s)) {
+                    this.sentences.push(s);
+                    this.sentenceIndexMap.push(i);
+                }
+            });
+        } else {
+            this.sentences = this.allSentences.slice();
+            this.sentenceIndexMap = this.allSentences.map((_, i) => i);
+        }
+    }
+
     rebuildPlaylist() {
         if (!this.allSentences) return;
-        // 재생 위치를 최대한 유지: 현재 읽던 문장을 새 목록에서 다시 찾는다
-        const currentText = this.sentences[this.currentIndex];
-        this.sentences = this.repeatEnglish
-            ? this.allSentences.filter(isEnglishSentence)
-            : this.allSentences;
+        // 재생 위치를 최대한 유지: 현재 읽던 지점 이후 가장 가까운 문장을 새 목록에서 찾는다
+        const globalIndex = this.sentenceIndexMap[this.currentIndex] ?? 0;
+        this.buildPlaylist();
         this.audioCache = {};
         this.repeatCountLeft = 0;
         this.lastSpokenIndex = -1;
-        const foundIndex = currentText ? this.sentences.indexOf(currentText) : -1;
-        this.currentIndex = foundIndex !== -1 ? foundIndex : 0;
+
+        let newIndex = this.sentenceIndexMap.findIndex(gi => gi >= globalIndex);
+        if (newIndex === -1) newIndex = Math.max(0, this.sentences.length - 1);
+        this.currentIndex = newIndex;
         this.updateCounter();
 
         if (this.isPlaying) {
@@ -556,17 +596,17 @@ class TTSManager {
         const textContent = this.previewPane.innerText || this.previewPane.textContent;
         if (this.sentenceCounter) this.sentenceCounter.textContent = '분석 중...';
         this.allSentences = await this.splitIntoSentences(textContent);
-        this.sentences = this.repeatEnglish
-            ? this.allSentences.filter(isEnglishSentence)
-            : this.allSentences;
+        this.buildPlaylist();
 
         if (this.sentences.length === 0) {
-            if (this.sentenceCounter) this.sentenceCounter.textContent = this.repeatEnglish ? '영어 문장 없음' : '0 / 0';
+            if (this.sentenceCounter) this.sentenceCounter.textContent = this.skipKorean ? '영어 문장 없음' : '0 / 0';
             return;
         }
 
         this.audioCache = {};
         this.currentIndex = 0;
+        this.repeatCountLeft = 0;
+        this.lastSpokenIndex = -1;
         this.isPlaying = true;
         this.isPaused = false;
 
@@ -579,7 +619,8 @@ class TTSManager {
         if (!this.isPlaying || this.isPaused) return;
 
         if (this.currentIndex >= this.sentences.length) {
-            if (this.repeatEnglish && this.sentences.length > 0) {
+            // 한글을 건너뛰는 짧은 연습 목록일 때만 끝에서 처음으로 되돌아간다
+            if (this.skipKorean && this.sentences.length > 0) {
                 this.currentIndex = 0;
             } else {
                 this.stop();
@@ -596,8 +637,9 @@ class TTSManager {
         }
 
         // 새 문장으로 넘어갈 때만 반복 횟수를 다시 채운다 (같은 문장 반복 중엔 유지)
+        // 반복은 영어 문장에만 적용되고, 한글 문장은 항상 한 번만 읽는다
         if (index !== this.lastSpokenIndex) {
-            this.repeatCountLeft = this.repeatEnglish ? this.repeatTimes - 1 : 0;
+            this.repeatCountLeft = (this.repeatEnglish && isEnglishSentence(sentence)) ? this.repeatTimes - 1 : 0;
             this.lastSpokenIndex = index;
         }
 
@@ -658,7 +700,7 @@ class TTSManager {
         this.audioPlayer.pause();
         if (this.currentIndex < this.sentences.length - 1) {
             this.currentIndex++;
-        } else if (this.repeatEnglish) {
+        } else if (this.skipKorean) {
             this.currentIndex = 0;
         } else {
             this.stop();
