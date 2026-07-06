@@ -546,6 +546,11 @@ textarea::placeholder {
   border-radius: 8px;
 }
 
+.icon-btn.seek-btn {
+  width: 56px;
+  border-radius: var(--radius-md);
+}
+
 .icon-btn.play-btn {
   width: 52px;
   height: 52px;
