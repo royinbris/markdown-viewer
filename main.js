@@ -14,6 +14,50 @@ marked.setOptions({
     gfm: true
 });
 
+// 라이트/다크 모드
+const THEME_KEY = 'theme';
+const sunIcon = `
+    <svg id="theme-toggle-icon" xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="4" />
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+    </svg>
+`;
+const moonIcon = `
+    <svg id="theme-toggle-icon" xmlns="http://www.w3.org/2000/svg" width="19" height="19" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </svg>
+`;
+
+function applyTheme(theme) {
+    document.documentElement.setAttribute('data-theme', theme);
+    const dark = document.getElementById('hljs-dark-theme');
+    const light = document.getElementById('hljs-light-theme');
+    if (dark) dark.disabled = theme === 'light';
+    if (light) light.disabled = theme !== 'light';
+    const icon = document.getElementById('theme-toggle-icon');
+    if (icon) icon.outerHTML = (theme === 'light' ? sunIcon : moonIcon).trim();
+}
+
+function initTheme() {
+    const saved = localStorage.getItem(THEME_KEY);
+    const theme = saved || (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+    applyTheme(theme);
+}
+
+initTheme();
+
+const themeToggleBtn = document.getElementById('theme-toggle-btn');
+if (themeToggleBtn) {
+    themeToggleBtn.addEventListener('click', () => {
+        const current = document.documentElement.getAttribute('data-theme') || 'dark';
+        const next = current === 'light' ? 'dark' : 'light';
+        localStorage.setItem(THEME_KEY, next);
+        applyTheme(next);
+    });
+}
+
 const editor = document.getElementById('markdown-input');
 const preview = document.getElementById('preview-output');
 const copyBtn = document.getElementById('copy-btn');
@@ -296,10 +340,10 @@ class TTSManager {
         if (this.prevBtn) this.prevBtn.addEventListener('click', () => this.prevSentence());
         if (this.nextBtn) this.nextBtn.addEventListener('click', () => this.nextSentence());
 
-        if (this.rateEnIncreaseBtn) this.rateEnIncreaseBtn.addEventListener('click', () => this.updateRate('en', 0.1));
-        if (this.rateEnDecreaseBtn) this.rateEnDecreaseBtn.addEventListener('click', () => this.updateRate('en', -0.1));
-        if (this.rateKoIncreaseBtn) this.rateKoIncreaseBtn.addEventListener('click', () => this.updateRate('ko', 0.1));
-        if (this.rateKoDecreaseBtn) this.rateKoDecreaseBtn.addEventListener('click', () => this.updateRate('ko', -0.1));
+        if (this.rateEnIncreaseBtn) this.rateEnIncreaseBtn.addEventListener('click', () => this.updateRate('en', 0.05));
+        if (this.rateEnDecreaseBtn) this.rateEnDecreaseBtn.addEventListener('click', () => this.updateRate('en', -0.05));
+        if (this.rateKoIncreaseBtn) this.rateKoIncreaseBtn.addEventListener('click', () => this.updateRate('ko', 0.05));
+        if (this.rateKoDecreaseBtn) this.rateKoDecreaseBtn.addEventListener('click', () => this.updateRate('ko', -0.05));
 
         if (this.repeatEnBtn) this.repeatEnBtn.addEventListener('click', () => this.toggleRepeatEnglish());
 
@@ -452,7 +496,7 @@ class TTSManager {
     }
 
     updateRate(lang, change) {
-        const clamp = v => Math.max(0.5, Math.min(2.0, parseFloat(v.toFixed(1))));
+        const clamp = v => Math.max(0.5, Math.min(2.0, parseFloat(v.toFixed(2))));
         if (lang === 'en') {
             this.rateEn = clamp(this.rateEn + change);
             localStorage.setItem('rate_en', this.rateEn);
@@ -469,8 +513,8 @@ class TTSManager {
     }
 
     updateRateDisplays() {
-        if (this.rateEnValueDisplay) this.rateEnValueDisplay.textContent = this.rateEn.toFixed(1);
-        if (this.rateKoValueDisplay) this.rateKoValueDisplay.textContent = this.rateKo.toFixed(1);
+        if (this.rateEnValueDisplay) this.rateEnValueDisplay.textContent = this.rateEn.toFixed(2);
+        if (this.rateKoValueDisplay) this.rateKoValueDisplay.textContent = this.rateKo.toFixed(2);
     }
 
     toggleRepeatEnglish() {
