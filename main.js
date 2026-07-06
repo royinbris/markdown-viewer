@@ -283,7 +283,7 @@ class TTSManager {
         this.sizeDecreaseBtn = document.getElementById('size-decrease');
         this.sizeValueDisplay = document.getElementById('size-value');
 
-        this.sentenceCounter = document.getElementById('sentence-counter');
+        this.sentenceCounter = document.getElementById('header-sentence-counter');
         this.previewPane = document.getElementById('preview-output');
         this.voiceSelect = document.getElementById('voice-select');
         this.fmtSelect = document.getElementById('fmt-select');
@@ -459,9 +459,12 @@ class TTSManager {
         const text = this.cleanTextForTTS(this.sentences[index]);
         if (!text) { this.audioCache[index] = Promise.resolve(null); return; }
         this.audioCache[index] = fetch(this.synthUrl(text))
-            .then(r => r.ok ? r.blob() : null)
-            .then(b => b ? URL.createObjectURL(b) : null)
-            .catch(() => null);
+            .then(r => r.ok ? r.blob() : Promise.reject(new Error(`HTTP ${r.status}`)))
+            .then(b => URL.createObjectURL(b))
+            .catch(e => {
+                this.lastFetchError = e?.message || '네트워크 오류';
+                return null;
+            });
     }
 
     highlightSentence(text) {
@@ -704,9 +707,10 @@ class TTSManager {
             this.prefetch(index + 1);
             this.prefetch(index + 2);
         } catch (e) {
-            console.error('TTS Error:', e);
+            console.error('TTS Error:', e, this.lastFetchError);
+            const detail = this.lastFetchError ? ` (${this.lastFetchError})` : '';
             this.stop();
-            if (this.sentenceCounter) this.sentenceCounter.textContent = '서버 연결 실패';
+            if (this.sentenceCounter) this.sentenceCounter.textContent = `서버 연결 실패${detail}`;
         }
     }
 
