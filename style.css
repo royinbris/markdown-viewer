@@ -505,11 +505,12 @@ textarea::placeholder {
 
 /* TTS Highlight */
 .highlight-sentence {
-  background: linear-gradient(90deg, var(--highlight-bg-a), var(--highlight-bg-b));
+  background: #000;
+  color: #ffe600;
   border-radius: 4px;
-  box-shadow: 0 0 0 1px var(--highlight-ring);
-  padding: 0 2px;
-  transition: background 0.2s;
+  padding: 0 3px;
+  font-weight: 700;
+  transition: background 0.2s, color 0.2s;
 }
 
 /* Footer Styling */
