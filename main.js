@@ -292,6 +292,7 @@ class TTSManager {
         this.settingsModal = document.getElementById('settings-modal');
         this.settingsOpenBtn = document.getElementById('settings-open-btn');
         this.settingsCloseBtn = document.getElementById('settings-close-btn');
+        this.settingsRefreshBtn = document.getElementById('settings-refresh-btn');
         this.repeatEnCheckbox = document.getElementById('repeat-en-checkbox');
         this.skipKoreanCheckbox = document.getElementById('skip-korean-checkbox');
         this.repeatCountIncreaseBtn = document.getElementById('repeat-count-increase');
@@ -368,6 +369,7 @@ class TTSManager {
 
         if (this.settingsOpenBtn) this.settingsOpenBtn.addEventListener('click', () => this.openSettings());
         if (this.settingsCloseBtn) this.settingsCloseBtn.addEventListener('click', () => this.closeSettings());
+        if (this.settingsRefreshBtn) this.settingsRefreshBtn.addEventListener('click', () => this.hardRefresh());
         if (this.settingsModal) {
             this.settingsModal.addEventListener('click', (e) => {
                 if (e.target === this.settingsModal) this.closeSettings();
@@ -399,6 +401,20 @@ class TTSManager {
 
     closeSettings() {
         if (this.settingsModal) this.settingsModal.classList.add('hidden');
+    }
+
+    // 아이폰 홈 화면 앱은 새 배포 후에도 캐시된 페이지를 계속 띄우는 경우가 많아,
+    // 쿼리스트링으로 URL을 바꿔 강제로 네트워크에서 새로 받아오게 한다
+    async hardRefresh() {
+        try {
+            if (window.caches) {
+                const keys = await caches.keys();
+                await Promise.all(keys.map(k => caches.delete(k)));
+            }
+        } catch (e) { /* ignore */ }
+        const url = new URL(window.location.href);
+        url.searchParams.set('_r', Date.now());
+        window.location.replace(url.toString());
     }
 
     saveServerSettings() {
