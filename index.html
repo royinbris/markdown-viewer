@@ -89,14 +89,6 @@
 
       <div class="separator"></div>
 
-      <div class="control-group">
-        <span class="control-label">피치</span>
-        <button id="pitch-decrease" class="icon-btn sm" title="피치 감소">-</button>
-        <span id="pitch-value" class="value-display">1.0</span>
-        <button id="pitch-increase" class="icon-btn sm" title="피치 증가">+</button>
-      </div>
-
-      <div class="separator"></div>
 
       <div class="control-group">
         <span class="control-label">크기</span>
@@ -109,9 +101,12 @@
 
       <div class="control-group">
         <span class="control-label">음성</span>
-        <select id="voice-select" class="voice-select" title="음성 선택">
-          <option value="">기본 음성</option>
+        <select id="voice-select" class="voice-select" title="음성 선택"></select>
+        <select id="fmt-select" class="voice-select" title="오디오 형식">
+          <option value="wav">WAV(집)</option>
+          <option value="aac">AAC(원격)</option>
         </select>
+        <button id="server-settings" class="icon-btn sm" title="서버 설정">⚙</button>
       </div>
 
       <div class="playback-controls">

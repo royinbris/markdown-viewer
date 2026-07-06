@@ -172,45 +172,45 @@ copyBtn.addEventListener('click', () => {
     });
 });
 
-// TTS Implementation (Dual Engine: Supertonic3 & Web Speech API)
+// TTS Implementation (Supertonic3 via All4me SupertonicTTS 서버)
+// Mac에서 실행 중인 SupertonicTTS 웹서버(/chunks, /synth)에 접속해 문장 단위로 합성/재생한다.
+// https로 배포된 페이지에서는 http 요청이 차단(mixed content)되므로 Tailscale HTTPS 주소를 기본값으로 사용
+const DEFAULT_SERVER_URL = location.protocol === 'https:'
+    ? 'https://roy-macbookair.tailf4ccb7.ts.net'
+    : 'http://royui-macbookair.local:8080';
+const DEFAULT_TOKEN = '8c3b3bb420a64406';
+const SUPERTONIC_VOICES = ['M1', 'M2', 'M3', 'M4', 'M5', 'F1', 'F2', 'F3', 'F4', 'F5'];
+
 class TTSManager {
     constructor() {
-        this.synth = window.speechSynthesis;
         this.audioPlayer = new Audio();
         this.sentences = [];
+        this.audioCache = {};
         this.currentIndex = 0;
         this.isPlaying = false;
         this.isPaused = false;
-        this.utterance = null;
-        
-        this.isSupertonic = true; // default to supertonic if available
-        this.selectedVoice = null;
 
-        // Settings
+        this.serverUrl = (localStorage.getItem('supertonic_url') || DEFAULT_SERVER_URL).replace(/\/$/, '');
+        this.token = localStorage.getItem('supertonic_token') || DEFAULT_TOKEN;
+        this.voice = localStorage.getItem('supertonic_voice') || 'M1';
+        this.fmt = localStorage.getItem('supertonic_fmt') || 'wav';
+
         this.rate = 1.0;
-        this.pitch = 1.0;
         this.textSize = 100; // percent
 
         // Controls
         this.toggleBtn = document.getElementById('footer-toggle');
-        this.toggleIcon = document.getElementById('footer-toggle-icon');
         this.stopBtn = document.getElementById('footer-stop');
         this.prevBtn = document.getElementById('tts-prev');
         this.nextBtn = document.getElementById('tts-next');
 
         // Header controls (Sync)
         this.headerToggleBtn = document.getElementById('tts-toggle');
-        this.headerToggleIcon = document.getElementById('tts-toggle-icon');
         this.headerStopBtn = document.getElementById('tts-stop');
 
-        // Settings Controls
         this.rateIncreaseBtn = document.getElementById('rate-increase');
         this.rateDecreaseBtn = document.getElementById('rate-decrease');
         this.rateValueDisplay = document.getElementById('rate-value');
-
-        this.pitchIncreaseBtn = document.getElementById('pitch-increase');
-        this.pitchDecreaseBtn = document.getElementById('pitch-decrease');
-        this.pitchValueDisplay = document.getElementById('pitch-value');
 
         this.sizeIncreaseBtn = document.getElementById('size-increase');
         this.sizeDecreaseBtn = document.getElementById('size-decrease');
@@ -219,25 +219,25 @@ class TTSManager {
         this.sentenceCounter = document.getElementById('sentence-counter');
         this.previewPane = document.getElementById('preview-output');
         this.voiceSelect = document.getElementById('voice-select');
+        this.fmtSelect = document.getElementById('fmt-select');
+        this.serverBtn = document.getElementById('server-settings');
 
         this.audioPlayer.addEventListener('ended', () => {
-            if (this.isPlaying && !this.isPaused && this.isSupertonic) {
+            if (this.isPlaying && !this.isPaused) {
                 this.currentIndex++;
                 this.speakNext();
             }
         });
 
-        this.audioPlayer.addEventListener('error', (e) => {
-            console.error('Audio playback error', e);
-            this.stop();
+        this.audioPlayer.addEventListener('error', () => {
+            if (this.audioPlayer.src) {
+                console.error('Audio playback error');
+                this.stop();
+            }
         });
 
         this.bindEvents();
-        this.loadVoices();
-        
-        window.onbeforeunload = () => {
-            this.synth.cancel();
-        };
+        this.populateVoices();
     }
 
     bindEvents() {
@@ -256,117 +256,90 @@ class TTSManager {
         if (this.rateIncreaseBtn) this.rateIncreaseBtn.addEventListener('click', () => this.updateRate(0.1));
         if (this.rateDecreaseBtn) this.rateDecreaseBtn.addEventListener('click', () => this.updateRate(-0.1));
 
-        if (this.pitchIncreaseBtn) this.pitchIncreaseBtn.addEventListener('click', () => this.updatePitch(0.1));
-        if (this.pitchDecreaseBtn) this.pitchDecreaseBtn.addEventListener('click', () => this.updatePitch(-0.1));
-
         if (this.sizeIncreaseBtn) this.sizeIncreaseBtn.addEventListener('click', () => this.updateSize(10));
         if (this.sizeDecreaseBtn) this.sizeDecreaseBtn.addEventListener('click', () => this.updateSize(-10));
 
         if (this.voiceSelect) {
-            this.voiceSelect.addEventListener('change', () => this.updateVoice());
+            this.voiceSelect.addEventListener('change', () => {
+                this.voice = this.voiceSelect.value;
+                localStorage.setItem('supertonic_voice', this.voice);
+                this.audioCache = {};
+            });
+        }
+
+        if (this.fmtSelect) {
+            this.fmtSelect.addEventListener('change', () => {
+                this.fmt = this.fmtSelect.value;
+                localStorage.setItem('supertonic_fmt', this.fmt);
+                this.audioCache = {};
+            });
+        }
+
+        if (this.serverBtn) {
+            this.serverBtn.addEventListener('click', () => this.editServerSettings());
         }
     }
 
-    async loadVoices() {
+    populateVoices() {
         if (!this.voiceSelect) return;
-        
-        const populateSelect = (supertonicVoices, nativeVoices) => {
-            // Retain previous selection if any
-            const previousValue = this.voiceSelect.value;
-            
-            this.voiceSelect.innerHTML = '';
-            
-            // Supertonic group
-            const stGroup = document.createElement('optgroup');
-            stGroup.label = 'Supertonic 3 (AI)';
-            supertonicVoices.forEach(voice => {
-                const option = document.createElement('option');
-                option.textContent = voice;
-                option.value = 'st:' + voice;
-                stGroup.appendChild(option);
-            });
-            if (stGroup.children.length > 0) {
-                this.voiceSelect.appendChild(stGroup);
-            }
-
-            // Native group
-            const nativeGroup = document.createElement('optgroup');
-            nativeGroup.label = '브라우저 기본 음성';
-            nativeVoices.forEach((voice, index) => {
-                const option = document.createElement('option');
-                option.textContent = `${voice.name} (${voice.lang})`;
-                option.value = 'nt:' + index;
-                nativeGroup.appendChild(option);
-            });
-            if (nativeGroup.children.length > 0) {
-                this.voiceSelect.appendChild(nativeGroup);
-            }
-            
-            if (previousValue && this.voiceSelect.querySelector(`option[value="${previousValue}"]`)) {
-                this.voiceSelect.value = previousValue;
-            } else if (stGroup.children.length > 0) {
-                this.voiceSelect.value = stGroup.children[0].value;
-            } else if (nativeGroup.children.length > 0) {
-                // Pre-select a Korean voice if possible
-                let koIdx = Array.from(nativeGroup.children).findIndex(opt => opt.textContent.includes('ko') || opt.textContent.includes('KO'));
-                if (koIdx !== -1) {
-                    this.voiceSelect.value = nativeGroup.children[koIdx].value;
-                } else {
-                    this.voiceSelect.value = nativeGroup.children[0].value;
-                }
-            }
-            
-            this.updateVoice();
-        };
-
-        let supertonicVoices = [];
-        try {
-            const res = await fetch('/api/voices');
-            const data = await res.json();
-            if (data.ok && data.voices) {
-                supertonicVoices = data.voices;
-            }
-        } catch (e) {
-            console.error('Failed to load Supertonic3 voices', e);
-        }
-
-        const nativeVoices = this.synth.getVoices();
-        populateSelect(supertonicVoices, nativeVoices);
-
-        if (speechSynthesis.onvoiceschanged !== undefined) {
-            speechSynthesis.onvoiceschanged = () => {
-                const newNativeVoices = this.synth.getVoices();
-                populateSelect(supertonicVoices, newNativeVoices);
-            };
-        }
+        this.voiceSelect.innerHTML = '';
+        SUPERTONIC_VOICES.forEach(v => {
+            const option = document.createElement('option');
+            option.textContent = v;
+            option.value = v;
+            this.voiceSelect.appendChild(option);
+        });
+        this.voiceSelect.value = SUPERTONIC_VOICES.includes(this.voice) ? this.voice : 'M1';
+        if (this.fmtSelect) this.fmtSelect.value = this.fmt;
     }
 
-    updateVoice() {
-        const val = this.voiceSelect.value;
-        if (!val) {
-            this.isSupertonic = false;
-            this.selectedVoice = null;
-            return;
-        }
-        
-        if (val.startsWith('st:')) {
-            this.isSupertonic = true;
-            this.selectedVoice = val.substring(3);
-        } else if (val.startsWith('nt:')) {
-            this.isSupertonic = false;
-            const idx = parseInt(val.substring(3), 10);
-            this.selectedVoice = this.synth.getVoices()[idx] || null;
-        }
+    editServerSettings() {
+        const url = prompt('Supertonic3 서버 주소', this.serverUrl);
+        if (url === null) return;
+        const token = prompt('접근 토큰', this.token);
+        if (token === null) return;
+        this.serverUrl = url.trim().replace(/\/$/, '');
+        this.token = token.trim();
+        localStorage.setItem('supertonic_url', this.serverUrl);
+        localStorage.setItem('supertonic_token', this.token);
+        this.audioCache = {};
+    }
+
+    synthUrl(text) {
+        return `${this.serverUrl}/synth?token=${encodeURIComponent(this.token)}` +
+            `&voice=${encodeURIComponent(this.voice)}&fmt=${encodeURIComponent(this.fmt)}` +
+            `&text=${encodeURIComponent(text)}`;
     }
 
     cleanTextForTTS(text) {
         return text.replace(/[*#`_\[\]]/g, '').trim();
     }
 
-    splitIntoSentences(text) {
+    async splitIntoSentences(text) {
+        // 서버의 문장 분리(/chunks)를 우선 사용, 실패 시 로컬 분리로 폴백
+        try {
+            const r = await fetch(`${this.serverUrl}/chunks?token=${encodeURIComponent(this.token)}&text=${encodeURIComponent(text)}`);
+            if (r.ok) {
+                const chunks = await r.json();
+                if (Array.isArray(chunks) && chunks.length > 0) return chunks;
+            }
+        } catch (e) {
+            console.warn('서버 문장 분리 실패, 로컬 분리 사용', e);
+        }
         return (text.match(/[^.!?\n]+[.!?\n\s]*|[^.!?\n]+$/g) || [])
             .map(s => s.trim())
             .filter(s => s.length > 0);
+    }
+
+    prefetch(index) {
+        if (index < 0 || index >= this.sentences.length) return;
+        if (this.audioCache[index]) return;
+        const text = this.cleanTextForTTS(this.sentences[index]);
+        if (!text) { this.audioCache[index] = Promise.resolve(null); return; }
+        this.audioCache[index] = fetch(this.synthUrl(text))
+            .then(r => r.ok ? r.blob() : null)
+            .then(b => b ? URL.createObjectURL(b) : null)
+            .catch(() => null);
     }
 
     highlightSentence(text) {
@@ -406,11 +379,6 @@ class TTSManager {
         this.audioPlayer.playbackRate = this.rate;
     }
 
-    updatePitch(change) {
-        this.pitch = Math.max(0.1, Math.min(2.0, parseFloat((this.pitch + change).toFixed(1))));
-        this.pitchValueDisplay.textContent = this.pitch.toFixed(1);
-    }
-
     updateSize(change) {
         this.textSize = Math.max(50, Math.min(200, this.textSize + change));
         this.sizeValueDisplay.textContent = `${this.textSize}%`;
@@ -433,7 +401,18 @@ class TTSManager {
         }
     }
 
-    play() {
+    // iOS: 사용자 제스처 안에서 무음 재생으로 오디오를 한 번 잠금 해제해야
+    // 이후 fetch(await) 뒤의 프로그램적 play()가 허용된다.
+    unlockAudio() {
+        if (this.audioUnlocked) return;
+        const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+        this.audioPlayer.src = SILENT_WAV;
+        const p = this.audioPlayer.play();
+        if (p && p.then) p.then(() => { this.audioUnlocked = true; }).catch(() => {});
+        else this.audioUnlocked = true;
+    }
+
+    async play() {
         if (this.isPaused) {
             this.resume();
             return;
@@ -442,22 +421,25 @@ class TTSManager {
         if (this.isPlaying) return;
 
         this.stop();
+        this.unlockAudio();
 
         const textContent = this.previewPane.innerText;
-        this.sentences = this.splitIntoSentences(textContent);
+        if (this.sentenceCounter) this.sentenceCounter.textContent = '분석 중...';
+        this.sentences = await this.splitIntoSentences(textContent);
 
-        if (this.sentences.length === 0) return;
+        if (this.sentences.length === 0) {
+            this.updateCounter();
+            return;
+        }
 
+        this.audioCache = {};
         this.currentIndex = 0;
         this.isPlaying = true;
         this.isPaused = false;
 
         this.updateControls();
         this.updateCounter();
-
-        setTimeout(() => {
-            this.speakNext();
-        }, 50);
+        this.speakNext();
     }
 
     async speakNext() {
@@ -468,8 +450,9 @@ class TTSManager {
             return;
         }
 
-        const sentence = this.sentences[this.currentIndex];
-        if (!sentence || sentence.trim().length === 0) {
+        const index = this.currentIndex;
+        const sentence = this.sentences[index];
+        if (!sentence || !this.cleanTextForTTS(sentence)) {
             this.currentIndex++;
             this.speakNext();
             return;
@@ -478,69 +461,29 @@ class TTSManager {
         this.highlightSentence(sentence);
         this.updateCounter();
 
-        const cleanText = this.cleanTextForTTS(sentence);
-        
-        if (this.isSupertonic) {
-            try {
-                const response = await fetch('/api/tts', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        text: cleanText,
-                        voice: this.selectedVoice,
-                        speed: this.rate
-                    })
-                });
+        this.prefetch(index);
+        this.prefetch(index + 1);
 
-                if (!response.ok) throw new Error('TTS API failed');
-                
-                const data = await response.json();
-                if (data.ok && data.audio_url) {
-                    if (!this.isPlaying || this.isPaused) return;
-                    
-                    this.audioPlayer.src = data.audio_url;
-                    this.audioPlayer.playbackRate = this.rate;
-                    await this.audioPlayer.play();
-                } else {
-                    throw new Error(data.error || 'TTS generation failed');
-                }
-            } catch (e) {
-                console.error('TTS Error:', e);
-                this.stop();
-            }
-        } else {
-            // Web Speech API fallback
-            this.utterance = new SpeechSynthesisUtterance(cleanText);
-            this.utterance.rate = this.rate;
-            this.utterance.pitch = this.pitch;
-            if (this.selectedVoice) {
-                this.utterance.voice = this.selectedVoice;
-            }
+        try {
+            const src = await this.audioCache[index];
+            if (!this.isPlaying || this.isPaused || this.currentIndex !== index) return;
+            if (!src) throw new Error('음성 합성 실패');
 
-            this.utterance.onend = () => {
-                if (this.isPlaying && !this.isPaused && !this.isSupertonic) {
-                    this.currentIndex++;
-                    setTimeout(() => this.speakNext(), 10);
-                }
-            };
-
-            this.utterance.onerror = (e) => {
-                if (e.error === 'interrupted' || e.error === 'canceled') return;
-                console.error('TTS Error:', e);
-                this.stop();
-            };
-
-            this.synth.speak(this.utterance);
+            this.audioPlayer.src = src;
+            this.audioPlayer.playbackRate = this.rate;
+            await this.audioPlayer.play();
+            this.prefetch(index + 1);
+            this.prefetch(index + 2);
+        } catch (e) {
+            console.error('TTS Error:', e);
+            this.stop();
+            if (this.sentenceCounter) this.sentenceCounter.textContent = '서버 연결 실패';
         }
     }
 
     pause() {
         if (this.isPlaying && !this.isPaused) {
-            if (this.isSupertonic) {
-                this.audioPlayer.pause();
-            } else {
-                this.synth.pause();
-            }
+            this.audioPlayer.pause();
             this.isPaused = true;
             this.updateControls();
         }
@@ -548,20 +491,17 @@ class TTSManager {
 
     resume() {
         if (this.isPlaying && this.isPaused) {
-            if (this.isSupertonic) {
-                this.audioPlayer.play().catch(e => console.error(e));
-            } else {
-                this.synth.resume();
-            }
+            this.audioPlayer.play().catch(e => console.error(e));
             this.isPaused = false;
             this.updateControls();
         }
     }
 
     stop() {
-        this.synth.cancel();
         this.audioPlayer.pause();
-        this.audioPlayer.src = '';
+        this.audioPlayer.removeAttribute('src');
+        Object.values(this.audioCache).forEach(p => Promise.resolve(p).then(u => u && URL.revokeObjectURL(u)));
+        this.audioCache = {};
         this.isPlaying = false;
         this.isPaused = false;
         this.currentIndex = 0;
@@ -572,11 +512,12 @@ class TTSManager {
 
     nextSentence() {
         if (!this.isPlaying) return;
-        this.synth.cancel();
         this.audioPlayer.pause();
         if (this.currentIndex < this.sentences.length - 1) {
             this.currentIndex++;
-            setTimeout(() => this.speakNext(), 50);
+            this.isPaused = false;
+            this.updateControls();
+            this.speakNext();
         } else {
             this.stop();
         }
@@ -584,14 +525,11 @@ class TTSManager {
 
     prevSentence() {
         if (!this.isPlaying) return;
-        this.synth.cancel();
         this.audioPlayer.pause();
-        if (this.currentIndex > 0) {
-            this.currentIndex--;
-            setTimeout(() => this.speakNext(), 50);
-        } else {
-            setTimeout(() => this.speakNext(), 50);
-        }
+        if (this.currentIndex > 0) this.currentIndex--;
+        this.isPaused = false;
+        this.updateControls();
+        this.speakNext();
     }
 
     updateControls() {
