@@ -584,4 +584,3 @@ class TTSManager {
 editor.value = initialMarkdown;
 updatePreview();
 const ttsManager = new TTSManager();
-window.__tts = ttsManager;
