@@ -157,6 +157,24 @@ body {
   transition: background 0.2s ease;
 }
 
+.app-header .voice-select {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 52px;
+  padding: 8px 6px;
+  text-align: center;
+  text-align-last: center;
+}
+
+.header-counter-group {
+  padding: 6px 16px;
+}
+
+.header-counter-group .counter {
+  min-width: 64px;
+  font-size: 14px;
+}
+
 #font-select:hover,
 .voice-select:hover {
   background: var(--surface-hover);
@@ -523,14 +541,6 @@ textarea::placeholder {
 
 .playback-row .play-btn {
   justify-self: center;
-}
-
-.header-counter-group {
-  padding: 6px 12px;
-}
-
-.header-counter-group .counter {
-  min-width: 0;
 }
 
 .control-group {
