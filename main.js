@@ -415,6 +415,19 @@ class TTSManager {
     // 아이폰 홈 화면 앱은 새 배포 후에도 캐시된 페이지를 계속 띄우는 경우가 많아,
     // 쿼리스트링으로 URL을 바꿔 강제로 네트워크에서 새로 받아오게 한다
     async hardRefresh() {
+        const icon = this.settingsRefreshBtn?.querySelector('svg');
+        if (icon) icon.classList.add('spinning');
+
+        // 지금 읽던 글과 위치를 저장해 두었다가, 새로고침 후 이어서 볼 수 있게 한다
+        try {
+            localStorage.setItem('pending_markdown', editor.value);
+            if (this.sentences.length > 0) {
+                localStorage.setItem('pending_resume_index', String(this.currentIndex));
+            } else {
+                localStorage.removeItem('pending_resume_index');
+            }
+        } catch (e) { /* ignore */ }
+
         try {
             if (window.caches) {
                 const keys = await caches.keys();
@@ -462,6 +475,12 @@ class TTSManager {
         return text.replace(/[*#`_\[\]]/g, '').trim();
     }
 
+    localSplitSentences(text) {
+        return (text.match(/[^.!?\n]+[.!?\n\s]*|[^.!?\n]+$/g) || [])
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+    }
+
     async splitIntoSentences(text) {
         // 서버의 문장 분리(/chunks)를 우선 사용, 실패 시 로컬 분리로 폴백
         try {
@@ -473,14 +492,13 @@ class TTSManager {
         } catch (e) {
             console.warn('서버 문장 분리 실패, 로컬 분리 사용', e);
         }
-        return (text.match(/[^.!?\n]+[.!?\n\s]*|[^.!?\n]+$/g) || [])
-            .map(s => s.trim())
-            .filter(s => s.length > 0);
+        return this.localSplitSentences(text);
     }
 
-    // 서버 연결 워밍업/일시적 지연에 대비해 실패 시 잠시 후 재시도한다
-    async fetchAudioWithRetry(text, retries = 2, delayMs = 900) {
-        for (let attempt = 0; attempt <= retries; attempt++) {
+    // 서버 연결 워밍업/일시적 지연(다른 앱과 동시 사용, 엔진 콜드 스타트 등)에 대비해
+    // 점점 더 오래 기다리며 재시도한다
+    async fetchAudioWithRetry(text, index, delays = [500, 1000, 2000, 4000]) {
+        for (let attempt = 0; attempt <= delays.length; attempt++) {
             try {
                 const r = await fetch(this.synthUrl(text));
                 if (r.ok) {
@@ -491,8 +509,11 @@ class TTSManager {
             } catch (e) {
                 this.lastFetchError = e?.message || '네트워크 오류';
             }
-            if (attempt < retries) {
-                await new Promise(res => setTimeout(res, delayMs));
+            if (attempt < delays.length) {
+                if (index === this.currentIndex && this.sentenceCounter) {
+                    this.sentenceCounter.textContent = `재시도 중... (${attempt + 1}/${delays.length})`;
+                }
+                await new Promise(res => setTimeout(res, delays[attempt]));
             }
         }
         return null;
@@ -503,7 +524,7 @@ class TTSManager {
         if (this.audioCache[index]) return;
         const text = this.cleanTextForTTS(this.sentences[index]);
         if (!text) { this.audioCache[index] = Promise.resolve(null); return; }
-        this.audioCache[index] = this.fetchAudioWithRetry(text);
+        this.audioCache[index] = this.fetchAudioWithRetry(text, index);
     }
 
     highlightSentence(text) {
@@ -644,7 +665,8 @@ class TTSManager {
         if (this.sentenceCounter) {
             const total = this.sentences.length;
             const current = total > 0 ? this.currentIndex + 1 : 0;
-            this.sentenceCounter.textContent = `${current} / ${total}`;
+            this.sentenceCounter.innerHTML =
+                `<span class="counter-num">${current}</span><span class="counter-num">${total}</span>`;
         }
     }
 
@@ -692,7 +714,10 @@ class TTSManager {
         }
 
         this.audioCache = {};
-        this.currentIndex = 0;
+        this.currentIndex = (typeof this.pendingResumeIndex === 'number' && this.pendingResumeIndex < this.sentences.length)
+            ? this.pendingResumeIndex
+            : 0;
+        this.pendingResumeIndex = null;
         this.repeatCountLeft = 0;
         this.lastSpokenIndex = -1;
         this.isPlaying = true;
@@ -858,6 +883,34 @@ class TTSManager {
 }
 
 // Initialize
-editor.value = initialMarkdown;
+// 새로고침(설정 > 새로고침) 전에 저장해 둔 내용/재생 위치가 있으면 이어서 복원한다
+const pendingMarkdown = localStorage.getItem('pending_markdown');
+if (pendingMarkdown !== null) {
+    editor.value = pendingMarkdown;
+    localStorage.removeItem('pending_markdown');
+} else {
+    editor.value = initialMarkdown;
+}
 updatePreview();
 const ttsManager = new TTSManager();
+
+const pendingResumeIndex = localStorage.getItem('pending_resume_index');
+if (pendingResumeIndex !== null) {
+    ttsManager.pendingResumeIndex = parseInt(pendingResumeIndex, 10);
+    localStorage.removeItem('pending_resume_index');
+    enterPreviewMode();
+
+    // 실제 재생(네트워크 문장 분리)은 재생 버튼을 누를 때 다시 이뤄지지만,
+    // 그 전에도 화면에 위치가 보이도록 로컬 분리로 미리 카운터/하이라이트를 맞춰둔다
+    const previewText = preview.innerText || preview.textContent;
+    const localSentences = ttsManager.localSplitSentences(previewText);
+    const localPlaylist = ttsManager.skipKorean
+        ? localSentences.filter(isEnglishSentence)
+        : localSentences;
+    if (ttsManager.pendingResumeIndex < localPlaylist.length) {
+        ttsManager.sentences = localPlaylist;
+        ttsManager.currentIndex = ttsManager.pendingResumeIndex;
+        ttsManager.updateCounter();
+        ttsManager.highlightSentence(localPlaylist[ttsManager.pendingResumeIndex]);
+    }
+}
