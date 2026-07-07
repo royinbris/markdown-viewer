@@ -511,11 +511,13 @@ textarea::placeholder {
 .highlight-sentence {
   background: var(--highlight-solid-bg);
   color: var(--highlight-solid-text);
-  border-radius: 8px;
-  padding: 3px 8px;
-  font-weight: 700;
+  border-radius: 12px;
+  padding: 8px 14px;
+  margin: 0 2px;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
+  font-weight: 700;
+  line-height: 1.9;
   box-shadow: 0 6px 16px var(--highlight-glow), 0 0 0 1px rgba(255, 214, 10, 0.22);
   animation: highlight-pop 0.25s ease;
   transition: background 0.2s, color 0.2s;
