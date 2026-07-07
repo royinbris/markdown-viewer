@@ -257,6 +257,7 @@ class TTSManager {
         this.repeatTimes = Math.max(1, parseInt(localStorage.getItem('repeat_times'), 10) || 2);
         this.repeatCountLeft = 0;
         this.lastSpokenIndex = -1;
+        this.lastHighlightFlatOffset = 0;
         // skipKorean: 재생 목록에서 한글 문장 자체를 제외
         this.skipKorean = localStorage.getItem('skip_korean') === 'true';
 
@@ -335,6 +336,11 @@ class TTSManager {
         this.updateRepeatButton();
         this.updateSkipKoreanCheckbox();
         if (this.repeatCountValueDisplay) this.repeatCountValueDisplay.textContent = this.repeatTimes;
+
+        // 탭을 닫거나 다른 곳으로 이동할 때 남아있는 오디오 캐시(blob URL)를 정리해
+        // 기기 저장공간에 불필요하게 남지 않게 한다. 배경 재생 중에는 방해하지 않도록
+        // 실제로 페이지를 떠나는 pagehide에서만 정리한다(탭 전환/화면 끄기 제외).
+        window.addEventListener('pagehide', () => this.revokeAllAudioCache());
     }
 
     bindEvents() {
@@ -527,6 +533,58 @@ class TTSManager {
         this.audioCache[index] = this.fetchAudioWithRetry(text, index);
     }
 
+    // 이미 재생을 마친 오래된 문장의 오디오(blob URL)는 계속 들고 있을 필요가 없다.
+    // 긴 글을 처음부터 끝까지 재생하는 동안 캐시가 무한정 쌓여 기기 저장공간을
+    // 갉아먹지 않도록, 현재 위치보다 충분히 앞선 항목은 그때그때 해제한다.
+    trimAudioCache(currentIndex, keepBehind = 2) {
+        Object.keys(this.audioCache).forEach(key => {
+            const idx = parseInt(key, 10);
+            if (idx < currentIndex - keepBehind) {
+                Promise.resolve(this.audioCache[idx]).then(u => u && URL.revokeObjectURL(u));
+                delete this.audioCache[idx];
+            }
+        });
+    }
+
+    // 탭을 닫거나 다른 페이지로 이동할 때 아직 재생하지 않은 캐시까지 확실히 정리한다
+    revokeAllAudioCache() {
+        Object.values(this.audioCache).forEach(p => Promise.resolve(p).then(u => u && URL.revokeObjectURL(u)));
+        this.audioCache = {};
+    }
+
+    // 미리보기의 모든 텍스트 노드를 순서대로 이어붙였을 때의 위치(flat offset) 기준으로
+    // 각 노드의 시작/끝 범위를 계산한다. 문장이 반복되는 문서에서 항상 문서 맨 앞부터
+    // 찾으면 엉뚱한(더 앞쪽의) 동일 문구를 강조하게 되므로, 직전 강조 위치 이후부터
+    // 우선 탐색하고, 찾지 못했을 때만(예: 이전 문장으로 이동) 처음부터 다시 찾는다.
+    findSentenceRange(cleanText) {
+        const walker = document.createTreeWalker(this.previewPane, NodeFilter.SHOW_TEXT, null, false);
+        const nodes = [];
+        let node;
+        let flatStart = 0;
+        while (node = walker.nextNode()) {
+            const len = node.nodeValue.length;
+            nodes.push({ node, flatStart });
+            flatStart += len;
+        }
+
+        const resumeFrom = this.lastHighlightFlatOffset || 0;
+
+        for (const { node, flatStart } of nodes) {
+            const localStart = Math.max(0, resumeFrom - flatStart);
+            if (localStart >= node.nodeValue.length) continue;
+            const idx = node.nodeValue.indexOf(cleanText, localStart);
+            if (idx !== -1) return { node, index: idx, flatIndex: flatStart + idx };
+        }
+
+        // 폴백: 직전 위치 이후에서 못 찾으면 문서 전체에서 다시 탐색 (뒤로 가기 등)
+        for (const { node, flatStart } of nodes) {
+            const idx = node.nodeValue.indexOf(cleanText);
+            if (idx !== -1) return { node, index: idx, flatIndex: flatStart + idx };
+        }
+
+        return null;
+    }
+
     highlightSentence(text) {
         const highlights = document.querySelectorAll('.highlight-sentence');
         highlights.forEach(el => {
@@ -539,23 +597,21 @@ class TTSManager {
         const cleanText = text.trim();
         if (!cleanText) return;
 
-        const walker = document.createTreeWalker(this.previewPane, NodeFilter.SHOW_TEXT, null, false);
-        let node;
-        while (node = walker.nextNode()) {
-            const index = node.nodeValue.indexOf(cleanText);
-            if (index !== -1) {
-                const range = document.createRange();
-                range.setStart(node, index);
-                range.setEnd(node, index + cleanText.length);
+        const match = this.findSentenceRange(cleanText);
+        if (!match) return;
 
-                const span = document.createElement('span');
-                span.className = 'highlight-sentence';
-                range.surroundContents(span);
+        const { node, index } = match;
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + cleanText.length);
 
-                span.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                break;
-            }
-        }
+        const span = document.createElement('span');
+        span.className = 'highlight-sentence';
+        range.surroundContents(span);
+
+        span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+        this.lastHighlightFlatOffset = match.flatIndex + cleanText.length;
     }
 
     updateRate(lang, change) {
@@ -731,6 +787,12 @@ class TTSManager {
     async speakNext() {
         if (!this.isPlaying || this.isPaused) return;
 
+        // 이전/다음을 연달아 빠르게 누르면 speakNext()가 겹쳐서 호출될 수 있다.
+        // 매 호출마다 세대 번호를 새로 발급해, 뒤늦게 끝난 이전 호출이 최신 상태를
+        // 덮어쓰지 않도록 한다(더 이상 유효하지 않으면 조용히 중단하고 stop()하지 않음).
+        this.playToken = (this.playToken || 0) + 1;
+        const myToken = this.playToken;
+
         if (this.currentIndex >= this.sentences.length) {
             // 한글을 건너뛰는 짧은 연습 목록일 때만 끝에서 처음으로 되돌아간다
             if (this.skipKorean && this.sentences.length > 0) {
@@ -749,6 +811,8 @@ class TTSManager {
             return;
         }
 
+        this.trimAudioCache(index);
+
         // 새 문장으로 넘어갈 때만 반복 횟수를 다시 채운다 (같은 문장 반복 중엔 유지)
         // 반복은 영어 문장에만 적용되고, 한글 문장은 항상 한 번만 읽는다
         if (index !== this.lastSpokenIndex) {
@@ -764,15 +828,18 @@ class TTSManager {
 
         try {
             const src = await this.audioCache[index];
-            if (!this.isPlaying || this.isPaused || this.currentIndex !== index) return;
+            if (myToken !== this.playToken || !this.isPlaying || this.isPaused) return;
             if (!src) throw new Error('음성 합성 실패');
 
             this.audioPlayer.src = src;
             this.audioPlayer.playbackRate = isEnglishSentence(sentence) ? this.rateEn : this.rateKo;
             await this.audioPlayer.play();
+            if (myToken !== this.playToken) return;
             this.prefetch(index + 1);
             this.prefetch(index + 2);
         } catch (e) {
+            // 더 최신 탐색(다음/이전 연타 등)이 이 재생을 가로챈 것이므로 정상적인 중단이다
+            if (myToken !== this.playToken || e?.name === 'AbortError') return;
             console.error('TTS Error:', e, this.lastFetchError);
             const detail = this.lastFetchError ? ` (${this.lastFetchError})` : '';
             this.stop();
@@ -799,11 +866,11 @@ class TTSManager {
     stop() {
         this.audioPlayer.pause();
         this.audioPlayer.removeAttribute('src');
-        Object.values(this.audioCache).forEach(p => Promise.resolve(p).then(u => u && URL.revokeObjectURL(u)));
-        this.audioCache = {};
+        this.revokeAllAudioCache();
         this.isPlaying = false;
         this.isPaused = false;
         this.currentIndex = 0;
+        this.lastHighlightFlatOffset = 0;
         this.highlightSentence(null);
         this.updateControls();
         if (this.sentenceCounter) this.sentenceCounter.textContent = "0 / 0";
@@ -829,6 +896,8 @@ class TTSManager {
         if (!this.isPlaying) return;
         this.audioPlayer.pause();
         if (this.currentIndex > 0) this.currentIndex--;
+        // 뒤로 이동하면 목표 문장이 직전 강조 위치보다 앞에 있으므로 처음부터 다시 찾는다
+        this.lastHighlightFlatOffset = 0;
         this.isPaused = false;
         this.updateControls();
         this.speakNext();
