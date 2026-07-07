@@ -108,10 +108,36 @@ viewToggleBtn.addEventListener('click', () => {
 });
 
 const fontSelect = document.getElementById('font-select');
+const weightDecreaseBtn = document.getElementById('weight-decrease');
+const weightIncreaseBtn = document.getElementById('weight-increase');
+const weightValueDisplay = document.getElementById('weight-value');
+
+const savedFont = localStorage.getItem('preview_font');
+if (savedFont) {
+    document.documentElement.style.setProperty('--preview-font', savedFont);
+    fontSelect.value = savedFont;
+}
 
 fontSelect.addEventListener('change', (e) => {
     document.documentElement.style.setProperty('--preview-font', e.target.value);
+    localStorage.setItem('preview_font', e.target.value);
 });
+
+let previewFontWeight = parseInt(localStorage.getItem('preview_font_weight'), 10) || 400;
+function applyFontWeight() {
+    document.documentElement.style.setProperty('--preview-font-weight', previewFontWeight);
+    if (weightValueDisplay) weightValueDisplay.textContent = previewFontWeight;
+}
+applyFontWeight();
+
+function updateFontWeight(change) {
+    previewFontWeight = Math.max(100, Math.min(900, previewFontWeight + change));
+    localStorage.setItem('preview_font_weight', previewFontWeight);
+    applyFontWeight();
+}
+
+if (weightIncreaseBtn) weightIncreaseBtn.addEventListener('click', () => updateFontWeight(100));
+if (weightDecreaseBtn) weightDecreaseBtn.addEventListener('click', () => updateFontWeight(-100));
 
 const initialMarkdown = `---
 title: 마크다운 뷰어 데모

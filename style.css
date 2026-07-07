@@ -36,6 +36,7 @@
   --table-th-bg: rgba(255, 255, 255, 0.04);
   --table-even-bg: rgba(255, 255, 255, 0.02);
   --preview-font: 'Noto Sans KR', sans-serif;
+  --preview-font-weight: 400;
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 20px;
@@ -286,6 +287,7 @@ textarea::placeholder {
 /* Markdown Styles */
 .markdown-body {
   font-family: var(--preview-font);
+  font-weight: var(--preview-font-weight);
   font-size: 1.02rem;
   line-height: 1.85;
   letter-spacing: -0.005em;
