@@ -295,6 +295,9 @@ class TTSManager {
 
         this.sentenceCounter = document.getElementById('header-sentence-counter');
         this.previewPane = document.getElementById('preview-output');
+        // 실제로 스크롤되는 바깥 컨테이너(overflow-y:auto). 화면에 보이는 위치를
+        // 계산할 때는 내용물(previewPane)이 아니라 이 컨테이너의 화면상 위치를 써야 한다.
+        this.previewScrollContainer = document.querySelector('.preview-pane') || this.previewPane;
         this.voiceSelect = document.getElementById('voice-select');
         this.fmtSelect = document.getElementById('fmt-select');
 
@@ -553,36 +556,81 @@ class TTSManager {
     }
 
     // 미리보기의 모든 텍스트 노드를 순서대로 이어붙였을 때의 위치(flat offset) 기준으로
-    // 각 노드의 시작/끝 범위를 계산한다. 문장이 반복되는 문서에서 항상 문서 맨 앞부터
-    // 찾으면 엉뚱한(더 앞쪽의) 동일 문구를 강조하게 되므로, 직전 강조 위치 이후부터
-    // 우선 탐색하고, 찾지 못했을 때만(예: 이전 문장으로 이동) 처음부터 다시 찾는다.
-    findSentenceRange(cleanText) {
+    // 각 노드의 시작 지점을 계산해 둔다.
+    buildTextNodeIndex() {
         const walker = document.createTreeWalker(this.previewPane, NodeFilter.SHOW_TEXT, null, false);
         const nodes = [];
         let node;
         let flatStart = 0;
         while (node = walker.nextNode()) {
-            const len = node.nodeValue.length;
             nodes.push({ node, flatStart });
-            flatStart += len;
+            flatStart += node.nodeValue.length;
         }
+        return nodes;
+    }
 
-        const resumeFrom = this.lastHighlightFlatOffset || 0;
-
+    // nodes 목록에서 cleanText를 찾되, resumeFrom 이후 위치를 우선 탐색하고
+    // 못 찾으면 문서 전체에서 다시 찾는다.
+    findRangeInNodes(nodes, resumeFrom, cleanText) {
         for (const { node, flatStart } of nodes) {
             const localStart = Math.max(0, resumeFrom - flatStart);
             if (localStart >= node.nodeValue.length) continue;
             const idx = node.nodeValue.indexOf(cleanText, localStart);
             if (idx !== -1) return { node, index: idx, flatIndex: flatStart + idx };
         }
-
-        // 폴백: 직전 위치 이후에서 못 찾으면 문서 전체에서 다시 탐색 (뒤로 가기 등)
         for (const { node, flatStart } of nodes) {
             const idx = node.nodeValue.indexOf(cleanText);
             if (idx !== -1) return { node, index: idx, flatIndex: flatStart + idx };
         }
-
         return null;
+    }
+
+    // 문장이 반복되는 문서에서 항상 문서 맨 앞부터 찾으면 엉뚱한(더 앞쪽의) 동일
+    // 문구를 강조하게 되므로, 직전 강조 위치 이후부터 우선 탐색한다.
+    findSentenceRange(cleanText) {
+        const nodes = this.buildTextNodeIndex();
+        return this.findRangeInNodes(nodes, this.lastHighlightFlatOffset || 0, cleanText);
+    }
+
+    // 미리보기 화면에서 현재 스크롤로 보이는 상단 지점의 텍스트 위치(flat offset)를 구한다
+    getViewportFlatOffset() {
+        const rect = this.previewScrollContainer.getBoundingClientRect();
+        const x = Math.min(rect.left + rect.width / 2, rect.right - 4);
+        const y = rect.top + 24;
+
+        let range = null;
+        if (document.caretRangeFromPoint) {
+            range = document.caretRangeFromPoint(x, y);
+        } else if (document.caretPositionFromPoint) {
+            const pos = document.caretPositionFromPoint(x, y);
+            if (pos) {
+                range = document.createRange();
+                range.setStart(pos.offsetNode, pos.offset);
+            }
+        }
+        if (!range || !this.previewPane.contains(range.startContainer)) return null;
+
+        const nodes = this.buildTextNodeIndex();
+        const target = nodes.find(n => n.node === range.startContainer);
+        return target ? target.flatStart + range.startOffset : null;
+    }
+
+    // 지금 화면에 보이는 위치에 해당하는 문장 인덱스를 찾는다. 찾지 못하면 0(처음부터).
+    findResumeIndexForViewport() {
+        const viewportOffset = this.getViewportFlatOffset();
+        if (viewportOffset === null || viewportOffset <= 0) return 0;
+
+        const nodes = this.buildTextNodeIndex();
+        let resumeFrom = 0;
+        for (let i = 0; i < this.sentences.length; i++) {
+            const cleanText = this.sentences[i].trim();
+            if (!cleanText) continue;
+            const match = this.findRangeInNodes(nodes, resumeFrom, cleanText);
+            if (!match) continue;
+            resumeFrom = match.flatIndex + cleanText.length;
+            if (resumeFrom > viewportOffset) return i;
+        }
+        return 0;
     }
 
     highlightSentence(text) {
@@ -772,7 +820,7 @@ class TTSManager {
         this.audioCache = {};
         this.currentIndex = (typeof this.pendingResumeIndex === 'number' && this.pendingResumeIndex < this.sentences.length)
             ? this.pendingResumeIndex
-            : 0;
+            : this.findResumeIndexForViewport();
         this.pendingResumeIndex = null;
         this.repeatCountLeft = 0;
         this.lastSpokenIndex = -1;
