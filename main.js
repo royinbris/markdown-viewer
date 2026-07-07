@@ -802,7 +802,7 @@ class TTSManager {
     populateSizeSelect() {
         if (!this.sizeSelect) return;
         this.sizeSelect.innerHTML = '';
-        for (let step = 0; step <= 10; step++) {
+        for (let step = 10; step >= 0; step--) {
             const percent = 100 + step * 10;
             const option = document.createElement('option');
             option.value = percent;
