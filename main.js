@@ -806,7 +806,7 @@ class TTSManager {
             const percent = 100 + step * 10;
             const option = document.createElement('option');
             option.value = percent;
-            option.textContent = `${percent}%`;
+            option.textContent = step;
             this.sizeSelect.appendChild(option);
         }
         this.sizeSelect.value = this.textSize;
