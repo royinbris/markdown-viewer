@@ -97,6 +97,8 @@ body {
   background-color: var(--bg-color);
   color: var(--text-color);
   height: 100vh;
+  /* Safari 주소창/도구모음이 보일 때도 실제 보이는 영역에 맞춘다 */
+  height: 100dvh;
   overflow: hidden;
   -webkit-font-smoothing: antialiased;
   touch-action: pan-x pan-y;
@@ -522,7 +524,7 @@ textarea::placeholder {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px 20px;
+  padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
   z-index: 10;
   font-size: 13px;
   flex-shrink: 0;
