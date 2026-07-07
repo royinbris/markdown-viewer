@@ -30,9 +30,9 @@
   --strong-color: #ffd166;
   --em-color: #ff9fc7;
   --link-underline: rgba(124, 155, 255, 0.35);
-  --highlight-bg-a: rgba(139, 123, 255, 0.22);
-  --highlight-bg-b: rgba(90, 167, 255, 0.22);
-  --highlight-ring: rgba(139, 123, 255, 0.25);
+  --highlight-solid-bg: #241c05;
+  --highlight-solid-text: #ffd60a;
+  --highlight-glow: rgba(255, 214, 10, 0.28);
   --table-th-bg: rgba(255, 255, 255, 0.04);
   --table-even-bg: rgba(255, 255, 255, 0.02);
   --preview-font: 'Noto Sans KR', sans-serif;
@@ -74,9 +74,9 @@
   --strong-color: #b8860b;
   --em-color: #c23f7f;
   --link-underline: rgba(84, 104, 224, 0.4);
-  --highlight-bg-a: rgba(123, 110, 242, 0.18);
-  --highlight-bg-b: rgba(63, 139, 234, 0.18);
-  --highlight-ring: rgba(84, 104, 224, 0.3);
+  --highlight-solid-bg: #0a0a0a;
+  --highlight-solid-text: #ffd60a;
+  --highlight-glow: rgba(0, 0, 0, 0.18);
   --table-th-bg: rgba(20, 24, 40, 0.035);
   --table-even-bg: rgba(20, 24, 40, 0.02);
   --shadow-soft: 0 8px 24px rgba(20, 24, 40, 0.12);
@@ -507,12 +507,34 @@ textarea::placeholder {
 
 /* TTS Highlight */
 .highlight-sentence {
-  background: #000;
-  color: #ffe600;
-  border-radius: 4px;
-  padding: 0 3px;
+  background: var(--highlight-solid-bg);
+  color: var(--highlight-solid-text);
+  border-radius: 8px;
+  padding: 3px 8px;
   font-weight: 700;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  box-shadow: 0 6px 16px var(--highlight-glow), 0 0 0 1px rgba(255, 214, 10, 0.22);
+  animation: highlight-pop 0.25s ease;
   transition: background 0.2s, color 0.2s;
+}
+
+@keyframes highlight-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .highlight-sentence {
+    animation: none;
+  }
 }
 
 /* Footer Styling */
