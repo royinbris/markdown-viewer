@@ -884,8 +884,26 @@ class TTSManager {
 
 // Initialize
 // iOS 단축어 등에서 ?text=로 공유된 내용이 있으면 최우선으로 사용(다른 복원 상태는 무시)
-const sharedText = new URLSearchParams(location.search).get('text');
+const urlParams = new URLSearchParams(location.search);
+const sharedText = urlParams.get('text');
 const hasSharedText = sharedText !== null && sharedText.trim() !== '';
+
+// 단축어 URL에 ?token=, ?server=를 심어두면 매번 설정에서 입력할 필요 없이 자동 저장된다
+const sharedToken = urlParams.get('token');
+const sharedServer = urlParams.get('server');
+if (sharedToken !== null && sharedToken.trim() !== '') {
+    localStorage.setItem('supertonic_token', sharedToken.trim());
+}
+if (sharedServer !== null && sharedServer.trim() !== '') {
+    localStorage.setItem('supertonic_url', sharedServer.trim().replace(/\/$/, ''));
+}
+if (urlParams.has('token') || urlParams.has('server')) {
+    const cleanParams = new URLSearchParams(location.search);
+    cleanParams.delete('token');
+    cleanParams.delete('server');
+    const cleanQuery = cleanParams.toString();
+    window.history.replaceState({}, '', location.pathname + (cleanQuery ? `?${cleanQuery}` : ''));
+}
 
 if (hasSharedText) {
     localStorage.removeItem('pending_markdown');
