@@ -654,6 +654,21 @@ textarea::placeholder {
   box-shadow: 0 0 0 1px rgba(124, 155, 255, 0.4);
 }
 
+.icon-btn.skip-korean-btn {
+  font-size: 15px;
+  font-weight: 700;
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+}
+
+.footer-size-select {
+  background: var(--surface);
+  border: 1px solid var(--border-color);
+  width: 68px;
+  text-align: center;
+  text-align-last: center;
+}
+
 .spacer {
   flex: 1;
 }

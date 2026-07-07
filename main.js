@@ -294,7 +294,7 @@ class TTSManager {
 
         this.rateEn = parseFloat(localStorage.getItem('rate_en')) || 1.0;
         this.rateKo = parseFloat(localStorage.getItem('rate_ko')) || 1.0;
-        this.textSize = 100; // percent
+        this.textSize = parseInt(localStorage.getItem('preview_text_size'), 10) || 100; // percent (100~200)
 
         // Controls
         this.toggleBtn = document.getElementById('footer-toggle');
@@ -302,6 +302,8 @@ class TTSManager {
         this.prevBtn = document.getElementById('tts-prev');
         this.nextBtn = document.getElementById('tts-next');
         this.repeatEnBtn = document.getElementById('tts-repeat-en');
+        this.skipKoreanBtn = document.getElementById('tts-skip-korean');
+        this.sizeSelect = document.getElementById('size-select');
 
         // Header controls (Sync)
         this.headerToggleBtn = document.getElementById('tts-toggle');
@@ -315,9 +317,6 @@ class TTSManager {
         this.rateKoDecreaseBtn = document.getElementById('rate-ko-decrease');
         this.rateKoValueDisplay = document.getElementById('rate-ko-value');
 
-        this.sizeIncreaseBtn = document.getElementById('size-increase');
-        this.sizeDecreaseBtn = document.getElementById('size-decrease');
-        this.sizeValueDisplay = document.getElementById('size-value');
 
         this.sentenceCounter = document.getElementById('header-sentence-counter');
         this.previewPane = document.getElementById('preview-output');
@@ -364,6 +363,8 @@ class TTSManager {
         this.updateRateDisplays();
         this.updateRepeatButton();
         this.updateSkipKoreanCheckbox();
+        this.populateSizeSelect();
+        this.setTextSize(this.textSize);
         if (this.repeatCountValueDisplay) this.repeatCountValueDisplay.textContent = this.repeatTimes;
 
         // 탭을 닫거나 다른 곳으로 이동할 때 남아있는 오디오 캐시(blob URL)를 정리해
@@ -391,9 +392,13 @@ class TTSManager {
         if (this.rateKoDecreaseBtn) this.rateKoDecreaseBtn.addEventListener('click', () => this.updateRate('ko', -0.05));
 
         if (this.repeatEnBtn) this.repeatEnBtn.addEventListener('click', () => this.toggleRepeatEnglish());
+        if (this.skipKoreanBtn) this.skipKoreanBtn.addEventListener('click', () => this.toggleSkipKorean());
 
-        if (this.sizeIncreaseBtn) this.sizeIncreaseBtn.addEventListener('click', () => this.updateSize(10));
-        if (this.sizeDecreaseBtn) this.sizeDecreaseBtn.addEventListener('click', () => this.updateSize(-10));
+        if (this.sizeSelect) {
+            this.sizeSelect.addEventListener('change', () => {
+                this.setTextSize(parseInt(this.sizeSelect.value, 10));
+            });
+        }
 
         if (this.voiceSelect) {
             this.voiceSelect.addEventListener('change', () => {
@@ -746,6 +751,7 @@ class TTSManager {
 
     updateSkipKoreanCheckbox() {
         if (this.skipKoreanCheckbox) this.skipKoreanCheckbox.checked = this.skipKorean;
+        if (this.skipKoreanBtn) this.skipKoreanBtn.classList.toggle('active', this.skipKorean);
     }
 
     // allSentences로부터 재생 목록을 만든다. sentenceIndexMap[i]는 sentences[i]가
@@ -792,10 +798,25 @@ class TTSManager {
         }
     }
 
-    updateSize(change) {
-        this.textSize = Math.max(50, Math.min(200, this.textSize + change));
-        this.sizeValueDisplay.textContent = `${this.textSize}%`;
+    // 드롭박스는 0~10 단계로 보여주되(0=100%, 10=200%), 실제 값은 100~200% 사이 10% 단위
+    populateSizeSelect() {
+        if (!this.sizeSelect) return;
+        this.sizeSelect.innerHTML = '';
+        for (let step = 0; step <= 10; step++) {
+            const percent = 100 + step * 10;
+            const option = document.createElement('option');
+            option.value = percent;
+            option.textContent = `${percent}%`;
+            this.sizeSelect.appendChild(option);
+        }
+        this.sizeSelect.value = this.textSize;
+    }
+
+    setTextSize(percent) {
+        this.textSize = Math.max(100, Math.min(200, percent));
+        localStorage.setItem('preview_text_size', this.textSize);
         this.previewPane.style.fontSize = `${this.textSize}%`;
+        if (this.sizeSelect) this.sizeSelect.value = this.textSize;
     }
 
     updateCounter() {
