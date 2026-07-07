@@ -291,6 +291,7 @@ class TTSManager {
         this.token = localStorage.getItem('supertonic_token') || '';
         this.voice = localStorage.getItem('supertonic_voice') || 'M1';
         this.fmt = localStorage.getItem('supertonic_fmt') || 'wav';
+        this.spatialAudio = localStorage.getItem('spatial_audio') === 'true';
 
         this.rateEn = parseFloat(localStorage.getItem('rate_en')) || 1.0;
         this.rateKo = parseFloat(localStorage.getItem('rate_ko')) || 1.0;
@@ -325,6 +326,7 @@ class TTSManager {
         this.previewScrollContainer = document.querySelector('.preview-pane') || this.previewPane;
         this.voiceSelect = document.getElementById('voice-select');
         this.fmtSelect = document.getElementById('fmt-select');
+        this.spatialAudioCheckbox = document.getElementById('spatial-audio-checkbox');
 
         // Settings modal
         this.settingsModal = document.getElementById('settings-modal');
@@ -412,6 +414,15 @@ class TTSManager {
             this.fmtSelect.addEventListener('change', () => {
                 this.fmt = this.fmtSelect.value;
                 localStorage.setItem('supertonic_fmt', this.fmt);
+                this.audioCache = {};
+            });
+        }
+
+        if (this.spatialAudioCheckbox) {
+            this.spatialAudioCheckbox.checked = this.spatialAudio;
+            this.spatialAudioCheckbox.addEventListener('change', () => {
+                this.spatialAudio = this.spatialAudioCheckbox.checked;
+                localStorage.setItem('spatial_audio', this.spatialAudio);
                 this.audioCache = {};
             });
         }
@@ -508,6 +519,7 @@ class TTSManager {
     synthUrl(text) {
         return `${this.serverUrl}/synth?token=${encodeURIComponent(this.token)}` +
             `&voice=${encodeURIComponent(this.voice)}&fmt=${encodeURIComponent(this.fmt)}` +
+            `${this.spatialAudio ? '&spatial=1' : ''}` +
             `&text=${encodeURIComponent(text)}`;
     }
 
