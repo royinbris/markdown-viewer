@@ -683,6 +683,13 @@ class TTSManager {
         span.className = 'highlight-sentence';
         range.surroundContents(span);
 
+        // blockquote/목록처럼 들여쓰기가 있는 위치에서도 강조 배경의 폭과 좌우 위치가
+        // 항상 본문(.markdown-body) 전체 폭과 같도록 맞춘다
+        const bodyRect = this.previewPane.getBoundingClientRect();
+        const spanRect = span.getBoundingClientRect();
+        span.style.marginLeft = `${bodyRect.left - spanRect.left}px`;
+        span.style.marginRight = `${spanRect.right - bodyRect.right}px`;
+
         span.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
         this.lastHighlightFlatOffset = match.flatIndex + cleanText.length;

@@ -509,15 +509,14 @@ textarea::placeholder {
 
 /* TTS Highlight */
 .highlight-sentence {
+  display: block;
   background: var(--highlight-solid-bg);
   color: var(--highlight-solid-text);
   border-radius: 12px;
-  padding: 8px 14px;
-  margin: 0 2px;
-  box-decoration-break: clone;
-  -webkit-box-decoration-break: clone;
+  padding: 12px 16px;
+  margin: 8px 0;
   font-weight: 700;
-  line-height: 1.9;
+  line-height: 1.6;
   box-shadow: 0 6px 16px var(--highlight-glow), 0 0 0 1px rgba(255, 214, 10, 0.22);
   animation: highlight-pop 0.25s ease;
   transition: background 0.2s, color 0.2s;
