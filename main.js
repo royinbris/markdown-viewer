@@ -883,34 +883,49 @@ class TTSManager {
 }
 
 // Initialize
-// 새로고침(설정 > 새로고침) 전에 저장해 둔 내용/재생 위치가 있으면 이어서 복원한다
-const pendingMarkdown = localStorage.getItem('pending_markdown');
-if (pendingMarkdown !== null) {
-    editor.value = pendingMarkdown;
+// iOS 단축어 등에서 ?text=로 공유된 내용이 있으면 최우선으로 사용(다른 복원 상태는 무시)
+const sharedText = new URLSearchParams(location.search).get('text');
+const hasSharedText = sharedText !== null && sharedText.trim() !== '';
+
+if (hasSharedText) {
     localStorage.removeItem('pending_markdown');
+    localStorage.removeItem('pending_resume_index');
+    window.history.replaceState({}, '', location.pathname);
+    editor.value = sharedText;
 } else {
-    editor.value = initialMarkdown;
+    // 새로고침(설정 > 새로고침) 전에 저장해 둔 내용이 있으면 이어서 복원한다
+    const pendingMarkdown = localStorage.getItem('pending_markdown');
+    if (pendingMarkdown !== null) {
+        editor.value = pendingMarkdown;
+        localStorage.removeItem('pending_markdown');
+    } else {
+        editor.value = initialMarkdown;
+    }
 }
 updatePreview();
 const ttsManager = new TTSManager();
 
-const pendingResumeIndex = localStorage.getItem('pending_resume_index');
-if (pendingResumeIndex !== null) {
-    ttsManager.pendingResumeIndex = parseInt(pendingResumeIndex, 10);
-    localStorage.removeItem('pending_resume_index');
+if (hasSharedText) {
     enterPreviewMode();
+} else {
+    const pendingResumeIndex = localStorage.getItem('pending_resume_index');
+    if (pendingResumeIndex !== null) {
+        ttsManager.pendingResumeIndex = parseInt(pendingResumeIndex, 10);
+        localStorage.removeItem('pending_resume_index');
+        enterPreviewMode();
 
-    // 실제 재생(네트워크 문장 분리)은 재생 버튼을 누를 때 다시 이뤄지지만,
-    // 그 전에도 화면에 위치가 보이도록 로컬 분리로 미리 카운터/하이라이트를 맞춰둔다
-    const previewText = preview.innerText || preview.textContent;
-    const localSentences = ttsManager.localSplitSentences(previewText);
-    const localPlaylist = ttsManager.skipKorean
-        ? localSentences.filter(isEnglishSentence)
-        : localSentences;
-    if (ttsManager.pendingResumeIndex < localPlaylist.length) {
-        ttsManager.sentences = localPlaylist;
-        ttsManager.currentIndex = ttsManager.pendingResumeIndex;
-        ttsManager.updateCounter();
-        ttsManager.highlightSentence(localPlaylist[ttsManager.pendingResumeIndex]);
+        // 실제 재생(네트워크 문장 분리)은 재생 버튼을 누를 때 다시 이뤄지지만,
+        // 그 전에도 화면에 위치가 보이도록 로컬 분리로 미리 카운터/하이라이트를 맞춰둔다
+        const previewText = preview.innerText || preview.textContent;
+        const localSentences = ttsManager.localSplitSentences(previewText);
+        const localPlaylist = ttsManager.skipKorean
+            ? localSentences.filter(isEnglishSentence)
+            : localSentences;
+        if (ttsManager.pendingResumeIndex < localPlaylist.length) {
+            ttsManager.sentences = localPlaylist;
+            ttsManager.currentIndex = ttsManager.pendingResumeIndex;
+            ttsManager.updateCounter();
+            ttsManager.highlightSentence(localPlaylist[ttsManager.pendingResumeIndex]);
+        }
     }
 }
