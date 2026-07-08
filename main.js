@@ -269,6 +269,8 @@ function isEnglishSentence(text) {
 }
 
 class TTSManager {
+    static SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+
     constructor() {
         this.audioPlayer = new Audio();
         this.sentences = [];
@@ -292,6 +294,9 @@ class TTSManager {
         this.voice = localStorage.getItem('supertonic_voice') || 'M1';
         this.fmt = localStorage.getItem('supertonic_fmt') || 'wav';
         this.spatialAudio = localStorage.getItem('spatial_audio') === 'true';
+        // 전체 오디오 모드: 현재 위치부터 끝까지를 하나의 긴 오디오로 만들어 재생.
+        // 재생 중엔 JS가 필요 없어 화면을 꺼도(백그라운드) 끝까지 재생된다(잠금화면 컨트롤 지원).
+        this.wholeAudioMode = localStorage.getItem('whole_audio_mode') === 'true';
 
         this.rateEn = parseFloat(localStorage.getItem('rate_en')) || 1.0;
         this.rateKo = parseFloat(localStorage.getItem('rate_ko')) || 1.0;
@@ -327,6 +332,7 @@ class TTSManager {
         this.voiceSelect = document.getElementById('voice-select');
         this.fmtSelect = document.getElementById('fmt-select');
         this.spatialAudioCheckbox = document.getElementById('spatial-audio-checkbox');
+        this.wholeAudioCheckbox = document.getElementById('whole-audio-checkbox');
 
         // Settings modal
         this.settingsModal = document.getElementById('settings-modal');
@@ -343,7 +349,14 @@ class TTSManager {
         this.serverSaveBtn = document.getElementById('server-save-btn');
 
         this.audioPlayer.addEventListener('ended', () => {
+            // iOS 잠금해제용 무음 WAV가 끝나면서 발생하는 ended는 무시(재생 로직과 무관)
+            if ((this.audioPlayer.src || '').includes(TTSManager.SILENT_WAV.slice(-24))) return;
             if (!this.isPlaying || this.isPaused) return;
+            // 전체 오디오 모드: 하나의 긴 오디오가 끝나면 재생 종료(문장 진행 없음)
+            if (this.wholeAudioActive) {
+                this.stop();
+                return;
+            }
             if (this.repeatEnglish && this.repeatCountLeft > 0) {
                 this.repeatCountLeft--;
                 this.speakNext();
@@ -424,6 +437,14 @@ class TTSManager {
                 this.spatialAudio = this.spatialAudioCheckbox.checked;
                 localStorage.setItem('spatial_audio', this.spatialAudio);
                 this.audioCache = {};
+            });
+        }
+
+        if (this.wholeAudioCheckbox) {
+            this.wholeAudioCheckbox.checked = this.wholeAudioMode;
+            this.wholeAudioCheckbox.addEventListener('change', () => {
+                this.wholeAudioMode = this.wholeAudioCheckbox.checked;
+                localStorage.setItem('whole_audio_mode', this.wholeAudioMode);
             });
         }
 
@@ -521,6 +542,41 @@ class TTSManager {
             `&voice=${encodeURIComponent(this.voice)}&fmt=${encodeURIComponent(this.fmt)}` +
             `${this.spatialAudio ? '&spatial=1' : ''}` +
             `&text=${encodeURIComponent(text)}`;
+    }
+
+    // 전체 오디오 모드용: 텍스트를 POST 본문으로 보내 하나의 긴 오디오 blob URL을 받는다.
+    // (긴 글은 URL 길이 제한 때문에 GET 불가)
+    async fetchWholeAudio(text) {
+        const params = `token=${encodeURIComponent(this.token)}` +
+            `&voice=${encodeURIComponent(this.voice)}&fmt=${encodeURIComponent(this.fmt)}` +
+            `${this.spatialAudio ? '&spatial=1' : ''}`;
+        try {
+            const r = await fetch(`${this.serverUrl}/synth?${params}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+                body: text
+            });
+            if (!r.ok) { this.lastFetchError = `HTTP ${r.status}`; return null; }
+            const blob = await r.blob();
+            return URL.createObjectURL(blob);
+        } catch (e) {
+            this.lastFetchError = e?.message || '네트워크 오류';
+            return null;
+        }
+    }
+
+    // 잠금화면/제어센터에서 재생·일시정지·정지가 되도록 MediaSession 연결
+    setupMediaSession() {
+        if (!('mediaSession' in navigator)) return;
+        try {
+            navigator.mediaSession.metadata = new MediaMetadata({
+                title: '마크뷰 읽기',
+                artist: 'Supertonic3',
+            });
+            navigator.mediaSession.setActionHandler('play', () => this.resume());
+            navigator.mediaSession.setActionHandler('pause', () => this.pause());
+            navigator.mediaSession.setActionHandler('stop', () => this.stop());
+        } catch (e) { /* ignore */ }
     }
 
     cleanTextForTTS(text) {
@@ -852,8 +908,7 @@ class TTSManager {
     // 이후 fetch(await) 뒤의 프로그램적 play()가 허용된다.
     unlockAudio() {
         if (this.audioUnlocked) return;
-        const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
-        this.audioPlayer.src = SILENT_WAV;
+        this.audioPlayer.src = TTSManager.SILENT_WAV;
         const p = this.audioPlayer.play();
         if (p && p.then) p.then(() => { this.audioUnlocked = true; }).catch(() => {});
         else this.audioUnlocked = true;
@@ -895,7 +950,47 @@ class TTSManager {
 
         this.updateControls();
         this.updateCounter();
-        this.speakNext();
+
+        if (this.wholeAudioMode) {
+            this.playWholeAudioFromCurrent();
+        } else {
+            this.speakNext();
+        }
+    }
+
+    // 현재 위치부터 끝까지의 문장을 하나의 오디오로 만들어 재생(백그라운드 지속 재생용)
+    async playWholeAudioFromCurrent() {
+        const startIndex = this.currentIndex;
+        const text = this.sentences.slice(startIndex)
+            .map(s => this.cleanTextForTTS(s))
+            .filter(Boolean)
+            .join(' ');
+        if (!text) { this.stop(); return; }
+
+        if (this.sentenceCounter) this.sentenceCounter.textContent = '오디오 생성 중...';
+        this.highlightSentence(this.sentences[startIndex]);
+
+        const src = await this.fetchWholeAudio(text);
+        if (!this.isPlaying) return;   // 그새 정지됨
+        if (!src) {
+            this.stop();
+            if (this.sentenceCounter) {
+                const detail = this.lastFetchError ? ` (${this.lastFetchError})` : '';
+                this.sentenceCounter.textContent = `서버 연결 실패${detail}`;
+            }
+            return;
+        }
+
+        this.audioPlayer.src = src;
+        this.audioPlayer.playbackRate = 1.0;   // 전체 오디오는 속도 조절 미적용(끊김 방지)
+        this.wholeAudioActive = true;
+        this.setupMediaSession();
+        try {
+            await this.audioPlayer.play();
+            if (this.sentenceCounter) this.sentenceCounter.textContent = '전체 재생 중';
+        } catch (e) {
+            console.error('전체 오디오 재생 실패', e);
+        }
     }
 
     async speakNext() {
@@ -979,7 +1074,12 @@ class TTSManager {
 
     stop() {
         this.audioPlayer.pause();
+        const prevSrc = this.audioPlayer.src;
         this.audioPlayer.removeAttribute('src');
+        if (this.wholeAudioActive && prevSrc && prevSrc.startsWith('blob:')) {
+            URL.revokeObjectURL(prevSrc);
+        }
+        this.wholeAudioActive = false;
         this.revokeAllAudioCache();
         this.isPlaying = false;
         this.isPaused = false;
